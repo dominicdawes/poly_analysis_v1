@@ -1,0 +1,15 @@
+# Core
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# WebSocket
+websockets>=12.0
+
+# HTTP
+requests>=2.31.0
+
+# Config
+python-dotenv>=1.0.0
+
+# Utilities
+colorama>=0.4.6

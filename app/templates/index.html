@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Poly Analysis — Trade Tracker</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+
+<!-- ============================================================
+     Header
+============================================================ -->
+<header class="header">
+  <div class="header-left">
+    <span class="logo">◆ Poly Analysis</span>
+    <span class="market-badge" id="marketBadge" title="{{ market_id }}">
+      {{ market_id[:20] ~ '…' if market_id|length > 20 else market_id or 'No market set' }}
+    </span>
+  </div>
+  <div class="header-right">
+    <span class="ws-indicator" id="wsIndicator" title="WebSocket status">
+      <span class="dot dot--grey"></span> WS
+    </span>
+    <span class="refresh-info" id="refreshInfo">Refreshing every 30s</span>
+    <button class="btn btn--sm" id="refreshBtn">↻ Refresh</button>
+  </div>
+</header>
+
+<!-- ============================================================
+     Stats Row
+============================================================ -->
+<main class="main">
+  <section class="stats-row" id="statsRow">
+    <div class="stat-card">
+      <div class="stat-label">Total Trades</div>
+      <div class="stat-value" id="statTrades">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Total Volume</div>
+      <div class="stat-value" id="statVolume">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg Trade Size</div>
+      <div class="stat-value" id="statAvg">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Largest Trade</div>
+      <div class="stat-value" id="statLargest">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Unique Traders</div>
+      <div class="stat-value" id="statTraders">—</div>
+    </div>
+  </section>
+
+  <!-- Volume by outcome -->
+  <section class="outcome-row" id="outcomeRow"></section>
+
+  <!-- ============================================================
+       Main content grid
+  ============================================================ -->
+  <div class="content-grid">
+
+    <!-- Left: Trade table -->
+    <div class="panel panel--wide">
+      <div class="panel-header">
+        <h2 class="panel-title">Recent Trades</h2>
+        <div class="filter-bar">
+          <input
+            type="number"
+            id="filterMinAmount"
+            class="filter-input"
+            placeholder="Min $ amount"
+            min="0"
+            step="10"
+          />
+          <select id="filterSide" class="filter-select">
+            <option value="">All sides</option>
+            <option value="BUY">BUY</option>
+            <option value="SELL">SELL</option>
+          </select>
+          <select id="filterOutcome" class="filter-select">
+            <option value="">All outcomes</option>
+            <option value="Yes">Yes</option>
+            <option value="No">No</option>
+          </select>
+          <label class="whale-toggle">
+            <input type="checkbox" id="filterWhalesOnly" />
+            🐋 Whales only (${{ whale_threshold | int }}+)
+          </label>
+          <button class="btn btn--sm btn--outline" id="applyFilter">Apply</button>
+          <button class="btn btn--sm btn--ghost" id="clearFilter">Clear</button>
+        </div>
+      </div>
+
+      <!-- Table -->
+      <div class="table-wrapper">
+        <table class="trade-table" id="tradeTable">
+          <thead>
+            <tr>
+              <th>Time (UTC)</th>
+              <th>Trader</th>
+              <th>Side</th>
+              <th>Outcome</th>
+              <th class="num">Price</th>
+              <th class="num">Shares</th>
+              <th class="num">USDC</th>
+              <th>Tx</th>
+            </tr>
+          </thead>
+          <tbody id="tradeTableBody">
+            <tr><td colspan="8" class="empty">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-footer">
+        <span id="tradeCount" class="table-count"></span>
+        <button class="btn btn--sm btn--primary" id="exportCsvBtn">
+          ↓ Export CSV
+        </button>
+      </div>
+    </div>
+
+    <!-- Right: Traders panel -->
+    <div class="panel panel--narrow">
+      <div class="panel-header">
+        <h2 class="panel-title">Top Traders</h2>
+        <span class="panel-sub">by volume</span>
+      </div>
+      <div id="tradersPanel" class="traders-list">
+        <div class="empty">Loading…</div>
+      </div>
+    </div>
+
+  </div><!-- /content-grid -->
+</main>
+
+<!-- ============================================================
+     Toast notifications
+============================================================ -->
+<div id="toastContainer" class="toast-container"></div>
+
+<script>
+  // Config injected from Flask
+  window.APP_CONFIG = {
+    marketId: {{ market_id | tojson }},
+    whaleThreshold: {{ whale_threshold }},
+    fetchInterval: {{ fetch_interval }},
+  };
+</script>
+<script src="/static/js/main.js"></script>
+</body>
+</html>
