@@ -36,8 +36,8 @@ poly_analysis_v1/
 ### 1. Create conda environment
 
 ```bash
-conda create -n poly python=3.11 -y
-conda activate poly
+conda create -n polymarket_v1 python=3.12 -y
+conda activate popolymarket_v1
 pip install -r requirements.txt
 ```
 

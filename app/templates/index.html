@@ -13,6 +13,7 @@
 ============================================================ -->
 <header class="header">
   <div class="header-left">
+    <button class="sidebar-toggle btn btn--ghost btn--sm" id="sidebarToggle" aria-label="Toggle sidebar">☰</button>
     <span class="logo">◆ Poly Analysis</span>
     <span class="market-badge" id="marketBadge" title="{{ market_id }}">
       {{ market_id[:20] ~ '…' if market_id|length > 20 else market_id or 'No market set' }}
@@ -30,6 +31,20 @@
 <!-- ============================================================
      Stats Row
 ============================================================ -->
+<div class="layout" id="layout">
+
+  <!-- Sidebar nav -->
+  <nav class="sidebar" id="sidebar">
+    <a class="sidebar-item sidebar-item--active" href="/">
+      <span class="sidebar-icon">📈</span>
+      <span class="sidebar-label">Live Trades</span>
+    </a>
+    <a class="sidebar-item" href="/wallet-dashboard">
+      <span class="sidebar-icon">👛</span>
+      <span class="sidebar-label">Wallet Analysis</span>
+    </a>
+  </nav>
+
 <main class="main">
   <section class="stats-row" id="statsRow">
     <div class="stat-card">
@@ -136,6 +151,7 @@
 
   </div><!-- /content-grid -->
 </main>
+</div><!-- /layout -->
 
 <!-- ============================================================
      Toast notifications

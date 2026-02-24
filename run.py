@@ -103,19 +103,36 @@ def main() -> None:
     logger.info("Database ready: %s", config.db_path)
 
     # ---- Services ------------------------------------------------------
-    from services.analysis  import AnalysisService
-    from services.ingestion import IngestionService
+    from services.analysis         import AnalysisService
+    from services.ingestion        import IngestionService
+    from services.polymarket_client import PolymarketClient
+    from services.wallet_analyzer  import WalletAnalyzer
+    from services.market_analyzer  import MarketAnalyzer
+    from services.scanner          import ScannerService
 
-    analysis  = AnalysisService(db, config.whale_threshold)
-    ingestion = IngestionService(config, db)
+    analysis        = AnalysisService(db, config.whale_threshold)
+    ingestion       = IngestionService(config, db)
+    poly_client     = PolymarketClient(config)
+    wallet_analyzer = WalletAnalyzer(config, db, poly_client)
+    market_analyzer = MarketAnalyzer(config, db, poly_client)
+    scanner         = ScannerService(config, db)
 
     # ---- Flask app -----------------------------------------------------
     from app.app import create_app
-    app = create_app(config, db, analysis, ingestion=ingestion)
+    app = create_app(
+        config, db, analysis,
+        ingestion=ingestion,
+        wallet_analyzer=wallet_analyzer,
+        market_analyzer=market_analyzer,
+    )
 
-    # ---- Start ingestion (background) ----------------------------------
+    # ---- Start background services ------------------------------------
     ingestion.start()
     logger.info("Ingestion service started — market=%s", config.market_id)
+
+    wallet_analyzer.start()
+    market_analyzer.start()
+    scanner.start()
 
     # Allow the first poll to complete before serving the UI
     time.sleep(2)

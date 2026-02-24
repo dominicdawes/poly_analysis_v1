@@ -5,14 +5,21 @@ Flask web application.
 
 Routes
 ------
-  GET  /                      — Dashboard HTML
-  GET  /api/trades            — Recent trades (JSON)
-  GET  /api/stats             — Aggregate stats (JSON)
-  GET  /api/traders           — Top traders (JSON)
-  GET  /api/whales            — Whale trades (JSON)
-  GET  /api/volume            — Volume by outcome (JSON)
-  GET  /api/export/csv        — CSV download
-  GET  /api/status            — Service health (JSON)
+  GET  /                         — Live trades dashboard (HTML)
+  GET  /wallet-dashboard         — Wallet analytics page (HTML)
+
+  GET  /api/trades               — Recent trades (JSON)
+  GET  /api/stats                — Aggregate stats (JSON)
+  GET  /api/traders              — Top traders (JSON)
+  GET  /api/whales               — Whale trades (JSON)
+  GET  /api/volume               — Volume by outcome (JSON)
+  GET  /api/export/csv           — CSV download
+
+  GET  /api/wallet/<address>     — Full wallet analytics (JSON)
+  GET  /api/wallets              — Top wallets leaderboard (JSON)
+  GET  /api/markets              — Tracked markets metadata (JSON)
+
+  GET  /api/status               — Service health (JSON)
 
 All /api/* endpoints accept optional query params:
   market_id   — override the configured market
@@ -34,8 +41,10 @@ from services.analysis import AnalysisService
 
 logger = logging.getLogger(__name__)
 
-# Reference to the IngestionService — set by run.py after start()
-_ingestion_ref = None
+# Service refs — set by run.py; accessed by the status endpoint
+_ingestion_ref       = None
+_wallet_analyzer_ref = None
+_market_analyzer_ref = None
 
 
 def create_app(
@@ -43,19 +52,25 @@ def create_app(
     db: Database,
     analysis: AnalysisService,
     ingestion=None,
+    wallet_analyzer=None,
+    market_analyzer=None,
 ) -> Flask:
     """
     Factory function.  Creates and configures the Flask app.
 
     Parameters
     ----------
-    config     : loaded Config object
-    db         : Database instance
-    analysis   : AnalysisService instance
-    ingestion  : IngestionService instance (optional, for status endpoint)
+    config           : loaded Config object
+    db               : Database instance
+    analysis         : AnalysisService instance
+    ingestion        : IngestionService instance (optional)
+    wallet_analyzer  : WalletAnalyzer instance (optional)
+    market_analyzer  : MarketAnalyzer instance (optional)
     """
-    global _ingestion_ref
-    _ingestion_ref = ingestion
+    global _ingestion_ref, _wallet_analyzer_ref, _market_analyzer_ref
+    _ingestion_ref       = ingestion
+    _wallet_analyzer_ref = wallet_analyzer
+    _market_analyzer_ref = market_analyzer
 
     template_dir = os.path.join(os.path.dirname(__file__), "templates")
     static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -193,21 +208,97 @@ def create_app(
         )
 
     # ----------------------------------------------------------------
+    # Page — wallet dashboard
+    # ----------------------------------------------------------------
+
+    @app.route("/wallet-dashboard")
+    def wallet_dashboard():
+        address = request.args.get("address", "")
+        return render_template(
+            "wallet_dashboard.html",
+            address=address,
+            whale_threshold=config.whale_threshold,
+        )
+
+    # ----------------------------------------------------------------
+    # API — single wallet analytics
+    # ----------------------------------------------------------------
+
+    @app.route("/api/wallet/<address>")
+    def api_wallet(address: str):
+        wallet = db.get_wallet(address)
+        if wallet is None:
+            return jsonify({
+                "error": "No data found for this wallet. "
+                         "It may not have any trades yet or the analyzer hasn't run."
+            }), 404
+
+        positions = db.get_positions_for_wallet(address)
+        trades    = db.get_recent_trades(
+            limit=_limit(default=50, cap=200),
+            wallet=address,
+        )
+        trades = [analysis.classify_trade(t) for t in trades]
+
+        return jsonify({
+            "wallet":    wallet,
+            "positions": positions,
+            "trades":    trades,
+        })
+
+    # ----------------------------------------------------------------
+    # API — wallet leaderboard
+    # ----------------------------------------------------------------
+
+    @app.route("/api/wallets")
+    def api_wallets():
+        _valid_order = {"total_volume", "realized_pnl", "total_trades", "last_seen"}
+        order_by  = request.args.get("order_by", "total_volume")
+        if order_by not in _valid_order:
+            order_by = "total_volume"
+
+        wallets = db.get_wallets(
+            limit=_limit(default=50, cap=200),
+            order_by=order_by,
+            min_volume=_min_amount(),
+        )
+        return jsonify(wallets)
+
+    # ----------------------------------------------------------------
+    # API — markets metadata
+    # ----------------------------------------------------------------
+
+    @app.route("/api/markets")
+    def api_markets():
+        markets = db.get_markets(limit=_limit(default=50, cap=200))
+        return jsonify(markets)
+
+    # ----------------------------------------------------------------
     # API — service status
     # ----------------------------------------------------------------
 
     @app.route("/api/status")
     def api_status():
-        ingestion = _ingestion_ref
+        ing  = _ingestion_ref
+        wa   = _wallet_analyzer_ref
+        ma   = _market_analyzer_ref
         status = {
             "status": "ok",
             "market_id": config.market_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "ingestion": {
-                "ws_connected": ingestion.ws_connected if ingestion else None,
-                "poll_count": ingestion.poll_count if ingestion else None,
-                "last_poll": ingestion.last_poll_ts if ingestion else None,
-                "trades_ingested": ingestion.new_trades_total if ingestion else None,
+                "ws_connected":    ing.ws_connected    if ing else None,
+                "poll_count":      ing.poll_count      if ing else None,
+                "last_poll":       ing.last_poll_ts    if ing else None,
+                "trades_ingested": ing.new_trades_total if ing else None,
+            },
+            "wallet_analyzer": {
+                "run_count":  wa.run_count   if wa else None,
+                "last_run":   wa.last_run_ts if wa else None,
+            },
+            "market_analyzer": {
+                "run_count":  ma.run_count   if ma else None,
+                "last_run":   ma.last_run_ts if ma else None,
             },
         }
         return jsonify(status)

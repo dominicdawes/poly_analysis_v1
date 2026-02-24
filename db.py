@@ -34,6 +34,7 @@ class Database:
         if db_dir:
             os.makedirs(db_dir, exist_ok=True)
         self._create_schema()
+        self._extend_schema()
 
     # ----------------------------------------------------------------
     # Connection management
@@ -105,15 +106,77 @@ class Database:
         conn.commit()
         conn.close()
 
+    def _extend_schema(self):
+        """Add Phase 2 tables (wallets, markets, positions).  Non-destructive."""
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA journal_mode=WAL")
+
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS wallets (
+                address              TEXT    PRIMARY KEY,
+                name                 TEXT,
+                pseudonym            TEXT,
+                profile_image        TEXT,
+                bio                  TEXT,
+                first_seen           INTEGER,
+                last_seen            INTEGER,
+                total_trades         INTEGER DEFAULT 0,
+                total_volume         REAL    DEFAULT 0.0,
+                total_buy_volume     REAL    DEFAULT 0.0,
+                total_sell_volume    REAL    DEFAULT 0.0,
+                largest_trade        REAL    DEFAULT 0.0,
+                avg_trade_size       REAL    DEFAULT 0.0,
+                num_active_positions INTEGER DEFAULT 0,
+                win_rate             REAL,
+                realized_pnl         REAL    DEFAULT 0.0,
+                last_updated         TEXT    NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS markets (
+                condition_id     TEXT    PRIMARY KEY,
+                title            TEXT,
+                slug             TEXT,
+                icon             TEXT,
+                description      TEXT,
+                category         TEXT,
+                end_date         TEXT,
+                resolved         INTEGER DEFAULT 0,
+                winning_outcome  TEXT,
+                last_fetched     TEXT    NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS positions (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                wallet_address   TEXT    NOT NULL REFERENCES wallets(address),
+                condition_id     TEXT    NOT NULL REFERENCES markets(condition_id),
+                outcome          TEXT    NOT NULL,
+                net_shares       REAL    DEFAULT 0.0,
+                avg_entry_price  REAL    DEFAULT 0.0,
+                total_bought     REAL    DEFAULT 0.0,
+                total_sold       REAL    DEFAULT 0.0,
+                realized_pnl     REAL    DEFAULT 0.0,
+                last_updated     TEXT    NOT NULL,
+                UNIQUE(wallet_address, condition_id, outcome)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_wallets_volume   ON wallets(total_volume DESC);
+            CREATE INDEX IF NOT EXISTS idx_wallets_pnl      ON wallets(realized_pnl DESC);
+            CREATE INDEX IF NOT EXISTS idx_positions_wallet ON positions(wallet_address);
+            CREATE INDEX IF NOT EXISTS idx_positions_market ON positions(condition_id);
+        """)
+
+        conn.commit()
+        conn.close()
+
     def verify_schema(self) -> bool:
-        """Return True if required tables exist."""
+        """Return True if all required tables exist."""
         conn = sqlite3.connect(self.db_path)
         rows = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()
         conn.close()
         existing = {r[0] for r in rows}
-        return {"trades", "traders"}.issubset(existing)
+        return {"trades", "traders", "wallets", "markets", "positions"}.issubset(existing)
 
     # ----------------------------------------------------------------
     # Writes
@@ -351,3 +414,223 @@ class Database:
         writer.writeheader()
         writer.writerows(trades)
         return buf.getvalue().encode("utf-8")
+
+    # ================================================================
+    # Phase 2 — Wallets
+    # ================================================================
+
+    def upsert_wallet(self, wallet: Dict) -> None:
+        """Insert or update an aggregated wallet row."""
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                """
+                INSERT INTO wallets (
+                    address, name, pseudonym, profile_image, bio,
+                    first_seen, last_seen, total_trades, total_volume,
+                    total_buy_volume, total_sell_volume, largest_trade,
+                    avg_trade_size, num_active_positions, win_rate,
+                    realized_pnl, last_updated
+                ) VALUES (
+                    :address, :name, :pseudonym, :profile_image, :bio,
+                    :first_seen, :last_seen, :total_trades, :total_volume,
+                    :total_buy_volume, :total_sell_volume, :largest_trade,
+                    :avg_trade_size, :num_active_positions, :win_rate,
+                    :realized_pnl, :last_updated
+                )
+                ON CONFLICT(address) DO UPDATE SET
+                    name             = COALESCE(excluded.name,          wallets.name),
+                    pseudonym        = COALESCE(excluded.pseudonym,     wallets.pseudonym),
+                    profile_image    = COALESCE(excluded.profile_image, wallets.profile_image),
+                    bio              = COALESCE(excluded.bio,           wallets.bio),
+                    first_seen       = excluded.first_seen,
+                    last_seen        = excluded.last_seen,
+                    total_trades     = excluded.total_trades,
+                    total_volume     = excluded.total_volume,
+                    total_buy_volume = excluded.total_buy_volume,
+                    total_sell_volume= excluded.total_sell_volume,
+                    largest_trade    = excluded.largest_trade,
+                    avg_trade_size   = excluded.avg_trade_size,
+                    num_active_positions = excluded.num_active_positions,
+                    win_rate         = excluded.win_rate,
+                    realized_pnl     = excluded.realized_pnl,
+                    last_updated     = excluded.last_updated
+                """,
+                wallet,
+            )
+            conn.commit()
+        except Exception as exc:
+            logger.error("upsert_wallet failed: %s", exc)
+            conn.rollback()
+
+    def get_wallet(self, address: str) -> Optional[Dict]:
+        """Return the wallets row for an address, or None."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM wallets WHERE address = ?", (address,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_wallets(
+        self,
+        limit: int = 50,
+        order_by: str = "total_volume",
+        min_volume: Optional[float] = None,
+    ) -> List[Dict]:
+        """Top wallets sorted by the given column (SQL-injection safe)."""
+        _allowed = {"total_volume", "realized_pnl", "total_trades", "last_seen"}
+        if order_by not in _allowed:
+            order_by = "total_volume"
+        conn = self._get_conn()
+        params: List = []
+        where = ""
+        if min_volume is not None:
+            where = "WHERE total_volume >= ?"
+            params.append(min_volume)
+        params.append(limit)
+        rows = conn.execute(
+            f"SELECT * FROM wallets {where} ORDER BY {order_by} DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_trader(self, proxy_wallet: str) -> Optional[Dict]:
+        """Return the traders row for this wallet (profile snapshot from ingestion)."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM traders WHERE proxy_wallet = ?", (proxy_wallet,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_distinct_wallets_from_trades(self) -> List[str]:
+        """All distinct proxy_wallet values seen in the trades table."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT DISTINCT proxy_wallet FROM trades"
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    def get_trades_for_wallet(self, address: str) -> List[Dict]:
+        """
+        All trades for a wallet, sorted oldest-first.
+        Used by wallet_analyzer for FIFO PnL computation.
+        """
+        conn = self._get_conn()
+        rows = conn.execute(
+            """
+            SELECT market_id, outcome, side, price, size, amount, match_time
+            FROM trades
+            WHERE proxy_wallet = ?
+            ORDER BY match_time ASC
+            """,
+            (address,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ================================================================
+    # Phase 2 — Positions
+    # ================================================================
+
+    def upsert_position(self, position: Dict) -> None:
+        """Insert or replace a wallet position row."""
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                """
+                INSERT INTO positions (
+                    wallet_address, condition_id, outcome,
+                    net_shares, avg_entry_price, total_bought, total_sold,
+                    realized_pnl, last_updated
+                ) VALUES (
+                    :wallet_address, :condition_id, :outcome,
+                    :net_shares, :avg_entry_price, :total_bought, :total_sold,
+                    :realized_pnl, :last_updated
+                )
+                ON CONFLICT(wallet_address, condition_id, outcome) DO UPDATE SET
+                    net_shares      = excluded.net_shares,
+                    avg_entry_price = excluded.avg_entry_price,
+                    total_bought    = excluded.total_bought,
+                    total_sold      = excluded.total_sold,
+                    realized_pnl    = excluded.realized_pnl,
+                    last_updated    = excluded.last_updated
+                """,
+                position,
+            )
+            conn.commit()
+        except Exception as exc:
+            logger.error("upsert_position failed: %s", exc)
+            conn.rollback()
+
+    def get_positions_for_wallet(self, address: str) -> List[Dict]:
+        """All positions for a wallet, joined with market title."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            """
+            SELECT p.*, m.title AS market_title, m.slug AS market_slug
+            FROM positions p
+            LEFT JOIN markets m ON p.condition_id = m.condition_id
+            WHERE p.wallet_address = ?
+            ORDER BY p.net_shares DESC, p.realized_pnl DESC
+            """,
+            (address,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ================================================================
+    # Phase 2 — Markets
+    # ================================================================
+
+    def upsert_market(self, market: Dict) -> None:
+        """Insert or update a market metadata row."""
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                """
+                INSERT INTO markets (
+                    condition_id, title, slug, icon, description, category,
+                    end_date, resolved, winning_outcome, last_fetched
+                ) VALUES (
+                    :condition_id, :title, :slug, :icon, :description, :category,
+                    :end_date, :resolved, :winning_outcome, :last_fetched
+                )
+                ON CONFLICT(condition_id) DO UPDATE SET
+                    title           = COALESCE(excluded.title,           markets.title),
+                    slug            = COALESCE(excluded.slug,            markets.slug),
+                    icon            = COALESCE(excluded.icon,            markets.icon),
+                    description     = COALESCE(excluded.description,     markets.description),
+                    category        = COALESCE(excluded.category,        markets.category),
+                    end_date        = COALESCE(excluded.end_date,        markets.end_date),
+                    resolved        = excluded.resolved,
+                    winning_outcome = COALESCE(excluded.winning_outcome, markets.winning_outcome),
+                    last_fetched    = excluded.last_fetched
+                """,
+                market,
+            )
+            conn.commit()
+        except Exception as exc:
+            logger.error("upsert_market failed: %s", exc)
+            conn.rollback()
+
+    def get_market(self, condition_id: str) -> Optional[Dict]:
+        """Return the markets row for a condition ID, or None."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM markets WHERE condition_id = ?", (condition_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_markets(self, limit: int = 50) -> List[Dict]:
+        """Return market rows ordered alphabetically by title."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM markets ORDER BY title ASC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_distinct_markets_from_trades(self) -> List[str]:
+        """All distinct market_id values seen in the trades table."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT DISTINCT market_id FROM trades"
+        ).fetchall()
+        return [r[0] for r in rows]

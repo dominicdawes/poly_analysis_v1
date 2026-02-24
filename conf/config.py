@@ -39,6 +39,10 @@ class Config:
     flask_port: int
     flask_debug: bool
 
+    # --- Phase 2: Analyzer intervals ---
+    wallet_analyzer_interval: int   # seconds between wallet aggregation runs
+    market_analyzer_interval: int   # seconds between market metadata runs
+
     # --- Credentials (optional for public endpoints) ---
     api_key: str
     api_secret: str
@@ -66,6 +70,8 @@ class Config:
             flask_host=os.getenv("FLASK_HOST", "0.0.0.0"),
             flask_port=int(os.getenv("FLASK_PORT", "5000")),
             flask_debug=os.getenv("FLASK_DEBUG", "false").lower() == "true",
+            wallet_analyzer_interval=int(os.getenv("WALLET_ANALYZER_INTERVAL", "300")),
+            market_analyzer_interval=int(os.getenv("MARKET_ANALYZER_INTERVAL", "3600")),
             api_key=os.getenv("POLY_API_KEY", ""),
             api_secret=os.getenv("POLY_API_SECRET", ""),
             api_passphrase=os.getenv("POLY_API_PASSPHRASE", ""),

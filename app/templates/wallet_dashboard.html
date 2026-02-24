@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Poly Analysis — Wallet Dashboard</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+
+<!-- ============================================================
+     Header
+============================================================ -->
+<header class="header">
+  <div class="header-left">
+    <button class="sidebar-toggle btn btn--ghost btn--sm" id="sidebarToggle" aria-label="Toggle sidebar">☰</button>
+    <span class="logo">◆ Poly Analysis</span>
+  </div>
+  <div class="header-right">
+    <label class="whale-toggle" title="Reload data automatically every 60 seconds">
+      <input type="checkbox" id="autoRefreshToggle" />
+      Auto-refresh
+    </label>
+    <span class="refresh-info" id="refreshInfo" style="display:none">Refreshing every 60s</span>
+  </div>
+</header>
+
+<!-- ============================================================
+     Layout: sidebar + main
+============================================================ -->
+<div class="layout" id="layout">
+
+  <!-- Sidebar nav -->
+  <nav class="sidebar" id="sidebar">
+    <a class="sidebar-item" href="/">
+      <span class="sidebar-icon">📈</span>
+      <span class="sidebar-label">Live Trades</span>
+    </a>
+    <a class="sidebar-item sidebar-item--active" href="/wallet-dashboard">
+      <span class="sidebar-icon">👛</span>
+      <span class="sidebar-label">Wallet Analysis</span>
+    </a>
+  </nav>
+
+  <!-- Page content -->
+  <main class="main" style="padding-top:16px">
+
+    <!-- Wallet search bar -->
+    <section class="wallet-search-section">
+      <div class="wallet-search-wrap">
+        <input
+          type="text"
+          id="walletSearchInput"
+          class="wallet-search-input"
+          placeholder="Enter wallet address (0x…)"
+          spellcheck="false"
+          autocomplete="off"
+        />
+        <button class="btn btn--primary" id="walletSearchBtn">Look up</button>
+      </div>
+    </section>
+
+    <!-- ── Empty state (default) ── -->
+    <div id="walletEmpty" class="wallet-empty-state">
+      <div class="wallet-empty-icon">👛</div>
+      <div class="wallet-empty-title">Wallet Analysis</div>
+      <div class="wallet-empty-sub">
+        Enter a wallet address above to view analytics,
+        open positions, and recent trade history.
+      </div>
+    </div>
+
+    <!-- ── Error state ── -->
+    <div id="walletError" class="wallet-empty-state" style="display:none">
+      <div class="wallet-empty-icon">⚠️</div>
+      <div class="wallet-empty-title" id="walletErrorTitle">Wallet not found</div>
+      <div class="wallet-empty-sub" id="walletErrorSub">
+        No analytics data found for this address.
+        The wallet analyzer may not have processed it yet,
+        or this address has no recorded trades.
+      </div>
+    </div>
+
+    <!-- ── Wallet content (shown after successful load) ── -->
+    <div id="walletContent" style="display:none">
+
+      <!-- Profile header -->
+      <div class="wallet-profile" id="walletProfile">
+        <div class="wallet-avatar-wrap">
+          <img id="walletAvatarImg" class="wallet-avatar-img" src="" alt="" style="display:none"
+               onerror="this.style.display='none';document.getElementById('walletAvatarPlaceholder').style.display='flex'" />
+          <div id="walletAvatarPlaceholder" class="wallet-avatar-placeholder">◆</div>
+        </div>
+        <div class="wallet-profile-info">
+          <div class="wallet-display-name" id="walletDisplayName">—</div>
+          <div class="wallet-address-mono" id="walletAddressMono">—</div>
+          <div class="wallet-bio" id="walletBio" style="display:none"></div>
+        </div>
+        <div class="wallet-meta">
+          <div class="wallet-updated" id="walletUpdated"></div>
+        </div>
+      </div>
+
+      <!-- Overview cards -->
+      <section class="stats-row wallet-stats-row">
+        <div class="stat-card">
+          <div class="stat-label">Wallet Age</div>
+          <div class="stat-value" id="wStatAge">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Trades</div>
+          <div class="stat-value" id="wStatTrades">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Volume</div>
+          <div class="stat-value" id="wStatVolume">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Realized PnL</div>
+          <div class="stat-value" id="wStatPnl">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Avg Trade Size</div>
+          <div class="stat-value" id="wStatAvg">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Largest Trade</div>
+          <div class="stat-value" id="wStatLargest">—</div>
+        </div>
+      </section>
+
+      <!-- Active Positions -->
+      <div class="panel">
+        <div class="panel-header">
+          <h2 class="panel-title">Active Positions</h2>
+          <span class="panel-sub" id="positionCount"></span>
+        </div>
+        <div class="table-wrapper">
+          <table class="trade-table">
+            <thead>
+              <tr>
+                <th>Market</th>
+                <th>Outcome</th>
+                <th class="num">Shares</th>
+                <th class="num">Avg Entry</th>
+                <th class="num">Cost Basis</th>
+                <th class="num">Realized PnL</th>
+              </tr>
+            </thead>
+            <tbody id="positionsBody">
+              <tr><td colspan="6" class="empty">No active positions.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Recent Trades -->
+      <div class="panel wallet-trades-panel">
+        <div class="panel-header">
+          <h2 class="panel-title">Recent Trades</h2>
+          <span class="panel-sub" id="walletTradeCount"></span>
+        </div>
+        <div class="table-wrapper">
+          <table class="trade-table">
+            <thead>
+              <tr>
+                <th>Time (UTC)</th>
+                <th>Market</th>
+                <th>Side</th>
+                <th>Outcome</th>
+                <th class="num">Price</th>
+                <th class="num">Shares</th>
+                <th class="num">USDC</th>
+              </tr>
+            </thead>
+            <tbody id="walletTradesBody">
+              <tr><td colspan="7" class="empty">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /walletContent -->
+
+  </main>
+</div><!-- /layout -->
+
+<!-- Toast -->
+<div id="toastContainer" class="toast-container"></div>
+
+<script>
+  window.APP_CONFIG = {
+    whaleThreshold: {{ whale_threshold }},
+  };
+  window.INITIAL_ADDRESS = {{ address | tojson }};
+</script>
+<script src="/static/js/wallet.js"></script>
+</body>
+</html>

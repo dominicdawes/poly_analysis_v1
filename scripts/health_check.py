@@ -68,6 +68,38 @@ def check_dependencies():
 
 
 # ================================================================
+# Helper — resolve market slug from Gamma API
+# ================================================================
+def _fetch_market_title(condition_id: str, data_api_url: str) -> str:
+    """
+    Return a human-readable title for the given condition ID.
+
+    Uses data-api.polymarket.com/trades (fetches 1 trade) because that
+    endpoint is correctly filtered by market and embeds title + slug in
+    every record.  Falls back to slug if title is absent.
+
+    Returns an empty string on any failure (non-fatal).
+    """
+    if not condition_id:
+        return ""
+    try:
+        import requests
+        resp = requests.get(
+            f"{data_api_url}/trades",
+            params={"market": condition_id, "limit": 1, "takerOnly": "false"},
+            timeout=8,
+        )
+        if resp.ok:
+            trades = resp.json()
+            if isinstance(trades, list) and trades:
+                t = trades[0]
+                return t.get("title") or t.get("slug") or ""
+    except Exception:
+        pass
+    return ""
+
+
+# ================================================================
 # Check 2 — Configuration / environment variables
 # ================================================================
 def check_config():
@@ -85,10 +117,15 @@ def check_config():
                 _report("Configuration", False, e)
             return None
 
+        title = _fetch_market_title(cfg.market_id, cfg.data_api_url)
+        market_label = f"{cfg.market_id!r}"
+        if title:
+            market_label += f"  ({title})"
+
         _report(
             "Configuration",
             True,
-            f"MARKET_ID={cfg.market_id!r}  FETCH_INTERVAL={cfg.fetch_interval}s  WHALE=${cfg.whale_threshold:,.0f}",
+            f"MARKET_ID={market_label}  FETCH_INTERVAL={cfg.fetch_interval}s  WHALE=${cfg.whale_threshold:,.0f}",
         )
         return cfg
 

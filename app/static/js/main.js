@@ -204,12 +204,14 @@ function renderTradeTable() {
       ? `<span class="badge badge--${(t.outcome||"").toLowerCase()}">${escHtml(t.outcome)}</span>`
       : "—";
 
+    const walletHref = `/wallet-dashboard?address=${encodeURIComponent(t.proxy_wallet || "")}`;
+
     return `<tr class="${isWhale ? "is-whale" : ""}">
       <td>${fmtTime(t.match_time)}</td>
       <td>
         <div class="trader-cell">
           ${avatarHtml}
-          <span class="trader-name" title="${escHtml(t.proxy_wallet || "")}">${escHtml(name)}</span>
+          <a class="trader-name trader-link" href="${walletHref}" title="${escHtml(t.proxy_wallet || "")}">${escHtml(name)}</a>
           ${whaleMark}
         </div>
       </td>
@@ -253,12 +255,16 @@ function renderTraders() {
       ? `<img class="trader-avatar-lg" src="${escHtml(imgSrc)}" alt="" loading="lazy" onerror="this.style.display='none'">`
       : `<div class="trader-avatar-placeholder">◆</div>`;
 
+    const walletHref = `/wallet-dashboard?address=${encodeURIComponent(t.proxy_wallet || "")}`;
+
     return `
       <div class="trader-card ${isWhale ? "trader-card--whale" : ""}">
         <div class="trader-rank">${i + 1}</div>
         ${avatarHtml}
         <div class="trader-info">
-          <div class="trader-display-name" title="${escHtml(t.proxy_wallet || "")}">${escHtml(name)}</div>
+          <div class="trader-display-name">
+            <a class="trader-link" href="${walletHref}" title="${escHtml(t.proxy_wallet || "")}">${escHtml(name)}</a>
+          </div>
           <div class="trader-wallet">${shortWallet(t.proxy_wallet)}</div>
         </div>
         <div class="trader-stats">
@@ -384,4 +390,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // CSV export
   document.getElementById("exportCsvBtn")?.addEventListener("click", exportCsv);
+
+  // Sidebar toggle (mobile)
+  const sidebarBtn = document.getElementById("sidebarToggle");
+  const sidebar     = document.getElementById("sidebar");
+  if (sidebarBtn && sidebar) {
+    sidebarBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      sidebar.classList.toggle("sidebar--open");
+    });
+    document.addEventListener("click", () => {
+      if (window.innerWidth < 768) {
+        sidebar.classList.remove("sidebar--open");
+      }
+    });
+  }
 });
