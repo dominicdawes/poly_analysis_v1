@@ -31,8 +31,11 @@ All /api/* endpoints accept optional query params:
 import io
 import logging
 import os
+import time
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
+import requests
 from flask import Flask, jsonify, render_template, request, Response
 
 from conf.config import Config
@@ -45,6 +48,93 @@ logger = logging.getLogger(__name__)
 _ingestion_ref       = None
 _wallet_analyzer_ref = None
 _market_analyzer_ref = None
+
+_GAMMA_BASE    = "https://gamma-api.polymarket.com"
+_DATA_API_BASE = "https://data-api.polymarket.com"
+_REQ_HEADERS   = {"User-Agent": "poly-analysis-v1/1.0", "Accept": "application/json"}
+
+
+def _parse_polymarket_slug(raw: str):
+    """Return the event slug from a Polymarket URL or a bare slug string."""
+    s = raw.strip()
+    if not s:
+        return None
+    # If it looks like a URL, parse the path
+    if "polymarket.com" in s or s.startswith("http"):
+        if "://" not in s:
+            s = "https://" + s
+        try:
+            parts = [p for p in urlparse(s).path.split("/") if p]
+            # path: /event/<event-slug>[/<market-slug>]
+            if parts and parts[0] == "event" and len(parts) >= 2:
+                return parts[1]
+        except Exception:
+            pass
+        return None
+    # Treat as bare slug (no slash, no spaces)
+    if "/" not in s and " " not in s:
+        return s
+    return None
+
+
+def _normalize_trade_record(raw: dict, fallback_market_id: str):
+    """Normalise a raw data-api trade dict to the DB schema (mirrors IngestionService)."""
+    try:
+        wallet = raw.get("proxyWallet") or raw.get("maker_address") or raw.get("owner")
+        if not wallet:
+            return None
+        price  = float(raw.get("price") or 0)
+        size   = float(raw.get("size")  or 0)
+        amount = round(price * size, 6)
+
+        ts = raw.get("timestamp")
+        if ts is None:
+            match_time = int(time.time())
+        elif isinstance(ts, (int, float)):
+            match_time = int(ts)
+        elif isinstance(ts, str):
+            try:
+                match_time = int(datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp())
+            except ValueError:
+                match_time = int(time.time())
+        else:
+            match_time = int(time.time())
+
+        return {
+            "transaction_hash": raw.get("transactionHash") or raw.get("transaction_hash"),
+            "market_id":        raw.get("conditionId") or raw.get("market") or fallback_market_id,
+            "token_id":         raw.get("asset") or raw.get("asset_id"),
+            "proxy_wallet":     wallet,
+            "side":             str(raw.get("side", "")).upper(),
+            "price":            price,
+            "size":             size,
+            "amount":           amount,
+            "outcome":          raw.get("outcome"),
+            "outcome_index":    raw.get("outcomeIndex"),
+            "market_title":     raw.get("title"),
+            "market_slug":      raw.get("slug"),
+            "market_icon":      raw.get("icon"),
+            "match_time":       match_time,
+        }
+    except (KeyError, ValueError, TypeError):
+        return None
+
+
+def _normalize_trader_record(raw: dict, now_iso: str):
+    """Extract trader profile from a raw trade dict (mirrors IngestionService)."""
+    wallet = raw.get("proxyWallet") or raw.get("maker_address") or raw.get("owner")
+    if not wallet:
+        return None
+    return {
+        "proxy_wallet":   wallet,
+        "name":           raw.get("name"),
+        "pseudonym":      raw.get("pseudonym"),
+        "profile_image":  raw.get("profileImageOptimized") or raw.get("profileImage"),
+        "bio":            raw.get("bio"),
+        "num_trades":     0,
+        "pnl_cumulative": 0.0,
+        "last_updated":   now_iso,
+    }
 
 
 def create_app(
@@ -302,6 +392,157 @@ def create_app(
             },
         }
         return jsonify(status)
+
+    # ----------------------------------------------------------------
+    # API — resolve a Polymarket URL to condition_id(s)
+    # ----------------------------------------------------------------
+
+    @app.route("/api/resolve-market")
+    def api_resolve_market():
+        url = request.args.get("url", "").strip()
+        if not url:
+            return jsonify({"error": "url parameter required"}), 400
+
+        slug = _parse_polymarket_slug(url)
+        if not slug:
+            return jsonify({"error": "Could not parse a market slug from this URL"}), 400
+
+        try:
+            resp = requests.get(
+                f"{_GAMMA_BASE}/events",
+                params={"slug": slug},
+                headers=_REQ_HEADERS,
+                timeout=10,
+            )
+            resp.raise_for_status()
+        except requests.exceptions.RequestException as exc:
+            logger.error("resolve-market: gamma-api error: %s", exc)
+            return jsonify({"error": "Could not reach Polymarket API"}), 502
+
+        events = resp.json()
+        if not events:
+            return jsonify({"error": f"No market found for slug '{slug}'"}), 404
+
+        event     = events[0]
+        raw_markets = event.get("markets") or []
+        parsed = [
+            {
+                "condition_id": m.get("conditionId"),
+                "question":     m.get("question") or event.get("title") or slug,
+            }
+            for m in raw_markets if m.get("conditionId")
+        ]
+
+        if not parsed:
+            return jsonify({"error": "Event found but no conditionId available"}), 404
+
+        return jsonify({
+            "title":   event.get("title") or slug,
+            "slug":    event.get("slug")  or slug,
+            "markets": parsed,
+        })
+
+    # ----------------------------------------------------------------
+    # API — on-demand trade load for a market (POST)
+    # ----------------------------------------------------------------
+
+    @app.route("/api/load-market", methods=["POST"])
+    def api_load_market():
+        body      = request.get_json(silent=True) or {}
+        market_id = (body.get("market_id") or "").strip()
+        if not market_id:
+            return jsonify({"error": "market_id required"}), 400
+
+        # Always flush stale records for this market so corrected API
+        # mappings are never blocked by INSERT OR IGNORE on old rows.
+        cleared = db.delete_trades_for_market(market_id)
+        if cleared:
+            logger.info("load-market: cleared %d stale trades for %s", cleared, market_id)
+
+        try:
+            resp = requests.get(
+                f"{_DATA_API_BASE}/trades",
+                params={"market": market_id, "limit": 500, "takerOnly": "true"},
+                headers=_REQ_HEADERS,
+                timeout=30,
+            )
+            resp.raise_for_status()
+        except requests.exceptions.RequestException as exc:
+            logger.error("load-market: data-api error: %s", exc)
+            return jsonify({"error": "Could not fetch trades from Polymarket"}), 502
+
+        payload = resp.json()
+        if isinstance(payload, list):
+            raw_trades = payload
+        elif isinstance(payload, dict):
+            raw_trades = payload.get("data") or payload.get("trades") or []
+        else:
+            raw_trades = []
+
+        stored   = 0
+        now_iso  = datetime.now(timezone.utc).isoformat()
+        for raw in raw_trades:
+            trade = _normalize_trade_record(raw, market_id)
+            if not trade:
+                continue
+            if db.insert_trade(trade):
+                stored += 1
+                trader = _normalize_trader_record(raw, now_iso)
+                if trader:
+                    db.upsert_trader(trader)
+
+        logger.info("load-market: market=%s cleared=%d fetched=%d stored=%d",
+                    market_id, cleared, len(raw_trades), stored)
+        return jsonify({
+            "market_id": market_id,
+            "cleared":   cleared,
+            "fetched":   len(raw_trades),
+            "stored":    stored,
+        })
+
+    # ----------------------------------------------------------------
+    # API — raw trade inspector (field-mapping debug)
+    # ----------------------------------------------------------------
+
+    @app.route("/api/debug/raw-trades")
+    def api_debug_raw_trades():
+        """
+        Return the raw Polymarket API response for the first N records of a
+        market so field names / values can be compared against what the tool
+        displays.  Use ?market_id=<id>&limit=5&taker_only=true|false.
+        """
+        market_id  = request.args.get("market_id", "").strip()
+        if not market_id:
+            return jsonify({"error": "market_id required"}), 400
+        limit      = min(int(request.args.get("limit", 5)), 20)
+        taker_only = request.args.get("taker_only", "true").lower()
+
+        try:
+            resp = requests.get(
+                f"{_DATA_API_BASE}/trades",
+                params={"market": market_id, "limit": limit, "takerOnly": taker_only},
+                headers=_REQ_HEADERS,
+                timeout=15,
+            )
+            resp.raise_for_status()
+        except requests.exceptions.RequestException as exc:
+            return jsonify({"error": str(exc)}), 502
+
+        payload    = resp.json()
+        raw_trades = payload if isinstance(payload, list) else (
+            payload.get("data") or payload.get("trades") or []
+        )
+
+        # Also show how the normalizer would map each record
+        normalized = [_normalize_trade_record(r, market_id) for r in raw_trades]
+
+        return jsonify({
+            "market_id":  market_id,
+            "taker_only": taker_only,
+            "count":      len(raw_trades),
+            "raw":        raw_trades,
+            "normalized": normalized,
+        })
 
     # ----------------------------------------------------------------
     # Error handlers

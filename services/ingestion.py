@@ -158,7 +158,7 @@ class IngestionService:
                 params={
                     "market": self.config.market_id,
                     "limit": 500,
-                    "takerOnly": "false",
+                    "takerOnly": "true",
                 },
                 timeout=30,
             )

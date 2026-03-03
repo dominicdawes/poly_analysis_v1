@@ -63,7 +63,7 @@ html, body {
 }
 
 .market-badge {
-  font-size: 11px;
+  font-size: 14px;
   color: var(--text-muted);
   background: var(--bg-hover);
   border: 1px solid var(--border);
@@ -635,6 +635,35 @@ td.empty {
 .sidebar-icon { font-size: 14px; line-height: 1; }
 .sidebar-label { font-weight: 500; }
 
+/* Market URL search (header) */
+.market-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.market-url-input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 4px 11px;
+  font-size: 12px;
+  height: 46px;
+  width: 300px;
+  transition: border-color 0.15s, width 0.2s;
+}
+.market-url-input::placeholder { color: var(--text-dim); }
+.market-url-input:focus {
+  outline: none;
+  border-color: var(--blue);
+  width: 350px;
+}
+
+@media (max-width: 900px) {
+  .market-search { display: none; }
+}
+
 /* Hamburger button — hidden on desktop */
 .sidebar-toggle { display: none; }
 
@@ -654,6 +683,42 @@ td.empty {
     left: 0;
     box-shadow: 4px 0 20px rgba(0,0,0,0.5);
   }
+}
+
+/* ================================================================
+   Multi-outcome market picker
+================================================================ */
+.market-picker {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 10px 0 14px;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 12px;
+}
+
+.market-tab {
+  padding: 5px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  white-space: nowrap;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.market-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.market-tab--active {
+  background: var(--green-dim);
+  border-color: var(--green);
+  color: var(--green);
 }
 
 /* ================================================================

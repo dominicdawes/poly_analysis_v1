@@ -19,6 +19,18 @@
       {{ market_id[:20] ~ '…' if market_id|length > 20 else market_id or 'No market set' }}
     </span>
   </div>
+  <div class="market-search" id="marketSearch">
+    <input
+      type="text"
+      id="marketUrlInput"
+      class="market-url-input"
+      placeholder="polymarket.com/event/…"
+      spellcheck="false"
+      autocomplete="off"
+    />
+    <button class="btn btn--sm btn--outline" id="marketSearchBtn">Load</button>
+  </div>
+
   <div class="header-right">
     <span class="ws-indicator" id="wsIndicator" title="WebSocket status">
       <span class="dot dot--grey"></span> WS
@@ -46,6 +58,9 @@
   </nav>
 
 <main class="main">
+  <!-- Multi-outcome market picker (hidden until a multi-market event is loaded) -->
+  <div id="marketPicker" class="market-picker" style="display:none"></div>
+
   <section class="stats-row" id="statsRow">
     <div class="stat-card">
       <div class="stat-label">Total Trades</div>
@@ -120,7 +135,7 @@
               <th>Outcome</th>
               <th class="num">Price</th>
               <th class="num">Shares</th>
-              <th class="num">USDC</th>
+              <th class="num">Total Value</th>
               <th>Tx</th>
             </tr>
           </thead>

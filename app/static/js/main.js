@@ -20,12 +20,13 @@ const UI_REFRESH_MS = 30_000;
 // ----------------------------------------------------------------
 // State
 // ----------------------------------------------------------------
-let _trades      = [];
-let _traders     = [];
-let _stats       = {};
-let _filterState = { minAmount: null, side: "", outcome: "", whalesOnly: false };
-let _refreshTimer = null;
-let _lastRefresh  = null;
+let _trades        = [];
+let _traders       = [];
+let _stats         = {};
+let _filterState   = { minAmount: null, side: "", outcome: "", whalesOnly: false };
+let _refreshTimer  = null;
+let _lastRefresh   = null;
+let _currentMarkets = [];   // [{condition_id, question}] for multi-outcome events
 
 // ----------------------------------------------------------------
 // DOM helpers
@@ -219,7 +220,7 @@ function renderTradeTable() {
       <td>${outcomeLabel}</td>
       <td class="num">${fmtPrice(t.price)}</td>
       <td class="num">${fmtNum(t.size)}</td>
-      <td class="num"><span class="${amtClass}">${fmtUSD(t.amount)}</span></td>
+      <td class="num" title="${fmtNum(t.size)} shares × ${fmtPrice(t.price)}"><span class="${amtClass}">${fmtUSD(t.amount)}</span></td>
       <td>${txHtml}</td>
     </tr>`;
   }).join("");
@@ -339,6 +340,121 @@ function escHtml(str) {
 }
 
 // ----------------------------------------------------------------
+// Market URL lookup + on-demand load
+// ----------------------------------------------------------------
+async function loadMarketFromUrl() {
+  const input = document.getElementById("marketUrlInput");
+  const raw   = (input?.value || "").trim();
+  if (!raw) return;
+
+  const btn = document.getElementById("marketSearchBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "…"; }
+
+  try {
+    // Step 1: Resolve URL / slug → list of {condition_id, question}
+    const resolveUrl = new URL("/api/resolve-market", window.location.origin);
+    resolveUrl.searchParams.set("url", raw);
+    const resolveResp = await fetch(resolveUrl.toString());
+    const resolveData = await resolveResp.json();
+
+    if (!resolveResp.ok) {
+      toast(resolveData.error || "Market not found", "error");
+      return;
+    }
+
+    const markets = resolveData.markets || [];
+    if (!markets.length) {
+      toast("No tradeable market found for this URL", "error");
+      return;
+    }
+
+    // Step 2: Load trades for ALL markets in parallel (each has its own conditionId)
+    const eventTitle = resolveData.title || raw;
+    if (markets.length > 1) {
+      toast(`${markets.length} outcomes — fetching trades for all…`, "info");
+    } else {
+      toast(`Fetching trades for "${markets[0].question || eventTitle}"…`, "info");
+    }
+
+    const loadResults = await Promise.allSettled(
+      markets.map(m =>
+        fetch("/api/load-market", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ market_id: m.condition_id }),
+        }).then(r => r.json())
+      )
+    );
+
+    const totalStored = loadResults.reduce((sum, r) =>
+      sum + (r.status === "fulfilled" ? (r.value.stored || 0) : 0), 0);
+
+    // Step 3: Switch dashboard to first market, store all for the picker
+    _currentMarkets = markets;
+    CFG.marketId    = markets[0].condition_id;
+
+    _updateMarketBadge(markets[0].question || eventTitle, markets[0].condition_id);
+    renderMarketPicker(markets, CFG.marketId);
+
+    if (input) input.value = "";
+    await refresh();
+
+    const label = markets.length > 1
+      ? `${markets.length} outcomes`
+      : `"${markets[0].question || eventTitle}"`;
+    toast(`Loaded ${totalStored} new trade${totalStored !== 1 ? "s" : ""} across ${label}`, "success");
+
+  } catch (e) {
+    console.error("loadMarketFromUrl:", e);
+    toast("Error loading market", "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Load"; }
+  }
+}
+
+function _updateMarketBadge(title, condId) {
+  const badge = document.getElementById("marketBadge");
+  if (!badge) return;
+  badge.textContent = title.length > 30 ? title.slice(0, 28) + "…" : title;
+  badge.title = condId;
+}
+
+// Render the multi-outcome tab picker.  Pass empty/single markets to hide it.
+function renderMarketPicker(markets, activeId) {
+  const picker = document.getElementById("marketPicker");
+  if (!picker) return;
+
+  if (!markets || markets.length <= 1) {
+    picker.style.display = "none";
+    picker.innerHTML = "";
+    return;
+  }
+
+  picker.style.display = "";
+  picker.innerHTML = markets.map(m => {
+    const label = m.question || m.condition_id;
+    const short = label.length > 48 ? label.slice(0, 45) + "…" : label;
+    const active = m.condition_id === activeId ? " market-tab--active" : "";
+    return `<button class="market-tab${active}" data-cid="${escHtml(m.condition_id)}" title="${escHtml(label)}">${escHtml(short)}</button>`;
+  }).join("");
+
+  picker.querySelectorAll(".market-tab").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const cid = btn.dataset.cid;
+      CFG.marketId = cid;
+
+      picker.querySelectorAll(".market-tab").forEach(b => b.classList.remove("market-tab--active"));
+      btn.classList.add("market-tab--active");
+
+      const mkt = _currentMarkets.find(m => m.condition_id === cid);
+      if (mkt) _updateMarketBadge(mkt.question || cid, cid);
+
+      refresh();
+    });
+  });
+}
+
+// ----------------------------------------------------------------
 // Full refresh cycle
 // ----------------------------------------------------------------
 async function refresh() {
@@ -390,6 +506,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // CSV export
   document.getElementById("exportCsvBtn")?.addEventListener("click", exportCsv);
+
+  // Market URL search
+  document.getElementById("marketSearchBtn")?.addEventListener("click", loadMarketFromUrl);
+  document.getElementById("marketUrlInput")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") loadMarketFromUrl();
+  });
 
   // Sidebar toggle (mobile)
   const sidebarBtn = document.getElementById("sidebarToggle");

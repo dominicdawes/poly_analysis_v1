@@ -634,3 +634,15 @@ class Database:
             "SELECT DISTINCT market_id FROM trades"
         ).fetchall()
         return [r[0] for r in rows]
+
+    def delete_trades_for_market(self, market_id: str) -> int:
+        """Delete all trades for a given market. Returns number of rows deleted."""
+        conn = self._get_conn()
+        try:
+            conn.execute("DELETE FROM trades WHERE market_id = ?", (market_id,))
+            conn.commit()
+            return conn.execute("SELECT changes()").fetchone()[0]
+        except Exception as exc:
+            logger.error("delete_trades_for_market failed: %s", exc)
+            conn.rollback()
+            return 0

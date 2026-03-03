@@ -176,8 +176,12 @@ class WalletAnalyzer:
             "last_updated":      now_iso,
         })
 
-        # 7. Upsert each position
+        # 7. Upsert each position.
+        #    The positions table has a FK on condition_id → markets.  Ensure a
+        #    stub market row exists before writing, so the constraint is never
+        #    violated even when market_analyzer hasn't run yet.
         for (condition_id, outcome), pos in positions.items():
+            self._ensure_market_stub(condition_id)
             self.db.upsert_position({
                 "wallet_address": address,
                 "condition_id":   condition_id,
@@ -189,6 +193,33 @@ class WalletAnalyzer:
                 "realized_pnl":   pos["realized_pnl"],
                 "last_updated":   now_iso,
             })
+
+    # ----------------------------------------------------------------
+    # Market stub helper
+    # ----------------------------------------------------------------
+
+    def _ensure_market_stub(self, condition_id: str) -> None:
+        """Insert a placeholder market row if none exists.
+
+        The positions table has a FK → markets(condition_id).  Because
+        market_analyzer runs lazily (hourly), we may need to write positions
+        before the market row exists.  A stub with epoch last_fetched signals
+        market_analyzer to fill in real metadata on its next cycle.
+        """
+        if self.db.get_market(condition_id):
+            return
+        self.db.upsert_market({
+            "condition_id":    condition_id,
+            "title":           None,
+            "slug":            None,
+            "icon":            None,
+            "description":     None,
+            "category":        None,
+            "end_date":        None,
+            "resolved":        0,
+            "winning_outcome": None,
+            "last_fetched":    "1970-01-01T00:00:00+00:00",  # epoch → triggers refetch
+        })
 
     # ----------------------------------------------------------------
     # Profile enrichment
