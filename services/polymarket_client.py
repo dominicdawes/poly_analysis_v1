@@ -86,8 +86,8 @@ class PolymarketClient:
         """
         Return profile info for a wallet from the Gamma API.
 
-        GET /profiles?address=<wallet>
-        Returns a list; takes first element.
+        GET /public-profile?address=<wallet>
+        Returns a single dict (not a list).
 
         Returns dict with keys: name, pseudonym, profile_image, bio
         or None if no profile found or the call fails.
@@ -96,22 +96,18 @@ class PolymarketClient:
             return None
 
         data = self._get(
-            f"{self._gamma_api}/profiles",
+            f"{self._gamma_api}/public-profile",
             params={"address": wallet_address},
         )
 
-        if isinstance(data, list) and data:
-            p = data[0]
-        elif isinstance(data, dict) and data:
-            p = data
-        else:
-            return None  # empty list = no profile (not an error)
+        if not isinstance(data, dict) or not data:
+            return None
 
         return {
-            "name":          p.get("name"),
-            "pseudonym":     p.get("pseudonym"),
-            "profile_image": p.get("profileImageOptimized") or p.get("profileImage"),
-            "bio":           p.get("bio"),
+            "name":          data.get("name"),
+            "pseudonym":     data.get("pseudonym"),
+            "profile_image": data.get("profileImageOptimized") or data.get("profileImage"),
+            "bio":           data.get("bio"),
         }
 
     # ----------------------------------------------------------------

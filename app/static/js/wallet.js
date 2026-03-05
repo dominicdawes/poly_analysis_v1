@@ -21,6 +21,11 @@ let _marketsMap     = {};   // condition_id → title
 let _refreshTimer   = null;
 let _autoRefresh    = false;
 
+// Chart state
+let _pnlHistory  = [];   // full sorted dataset [{ts, pnl, cum_pnl}]
+let _pnlChart    = null; // Chart.js instance
+let _activePeriod = "all";
+
 // ----------------------------------------------------------------
 // DOM helpers
 // ----------------------------------------------------------------
@@ -149,6 +154,23 @@ function renderWallet(data) {
   setText("walletDisplayName", displayName);
   setText("walletAddressMono", w.address || "");
 
+  // ── Wallet eye button (watchlist) ─────────────────────────────
+  const eyeBtn = document.getElementById("walletEyeBtn");
+  if (eyeBtn && w.address && window.WL) {
+    eyeBtn.style.display = "";
+    const _applyWalletEye = (isWatched) => {
+      eyeBtn.classList.toggle("eye-btn--watched",   isWatched);
+      eyeBtn.classList.toggle("eye-btn--unwatched", !isWatched);
+      eyeBtn.innerHTML = isWatched ? "Watchlist 👁" : "Add Wallet to Watchlist 👁";
+    };
+    window.WL.checkWatchStatus("wallet", w.address).then(s => _applyWalletEye(s.is_watched));
+    eyeBtn.onclick = () => {
+      window.WL.showAddModal("wallet", w.address, displayName, () => {
+        window.WL.checkWatchStatus("wallet", w.address).then(s => _applyWalletEye(s.is_watched));
+      });
+    };
+  }
+
   const imgEl  = document.getElementById("walletAvatarImg");
   const phEl   = document.getElementById("walletAvatarPlaceholder");
   if (w.profile_image) {
@@ -254,6 +276,199 @@ function renderWallet(data) {
 }
 
 // ----------------------------------------------------------------
+// PnL Chart — Chart.js helpers
+// ----------------------------------------------------------------
+
+// Crosshair plugin: draws a vertical line at the hovered x position
+const _crosshairPlugin = {
+  id: "crosshair",
+  afterDraw(chart) {
+    if (!chart._crosshairX) return;
+    const { ctx, chartArea: { top, bottom } } = chart;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(chart._crosshairX, top);
+    ctx.lineTo(chart._crosshairX, bottom);
+    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    ctx.lineWidth   = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.stroke();
+    ctx.restore();
+  },
+};
+
+function _buildGradient(ctx, chartArea, isPositive) {
+  const grad = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+  if (isPositive) {
+    grad.addColorStop(0, "rgba(63,185,80,0.35)");
+    grad.addColorStop(1, "rgba(63,185,80,0.02)");
+  } else {
+    grad.addColorStop(0, "rgba(248,81,73,0.02)");
+    grad.addColorStop(1, "rgba(248,81,73,0.35)");
+  }
+  return grad;
+}
+
+function initPnlChart() {
+  const canvas = document.getElementById("pnlChart");
+  if (!canvas || !window.Chart) return;
+
+  if (_pnlChart) {
+    _pnlChart.destroy();
+    _pnlChart = null;
+  }
+
+  const ctx = canvas.getContext("2d");
+
+  _pnlChart = new Chart(ctx, {
+    type: "line",
+    plugins: [_crosshairPlugin],
+    data: {
+      labels: [],
+      datasets: [{
+        data: [],
+        borderColor: "var(--green)",
+        borderWidth: 1.5,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        pointHoverBackgroundColor: "var(--green)",
+        fill: true,
+        backgroundColor: (context) => {
+          const chart     = context.chart;
+          const { ctx: c, chartArea } = chart;
+          if (!chartArea) return "transparent";
+          const data = chart.data.datasets[0].data;
+          const last = data.length ? data[data.length - 1] : 0;
+          return _buildGradient(c, chartArea, last >= 0);
+        },
+        tension: 0.3,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 250 },
+      interaction: { mode: "index", intersect: false },
+      onHover(_, elements, chart) {
+        if (elements.length) {
+          const el = elements[0];
+          chart._crosshairX = el.element.x;
+        } else {
+          chart._crosshairX = null;
+        }
+        chart.draw();
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          displayColors: false,
+          backgroundColor: "#1f2937",
+          borderColor: "#30363d",
+          borderWidth: 1,
+          titleColor: "#8b949e",
+          bodyColor: "#e6edf3",
+          padding: 10,
+          callbacks: {
+            title(items) {
+              return items[0]?.label || "";
+            },
+            label(item) {
+              const val = item.raw;
+              const sign = val >= 0 ? "+" : "";
+              return `PnL  ${sign}${fmtUSD(val)}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: {
+            color: "#8b949e",
+            font: { size: 10 },
+            maxTicksLimit: 6,
+            maxRotation: 0,
+          },
+          grid: { color: "rgba(48,54,61,0.6)" },
+        },
+        y: {
+          ticks: {
+            color: "#8b949e",
+            font: { size: 10 },
+            callback: (v) => fmtUSD(v),
+          },
+          grid: { color: "rgba(48,54,61,0.6)" },
+        },
+      },
+    },
+  });
+}
+
+function _cutoffTs(period) {
+  const now = Date.now() / 1000;
+  switch (period) {
+    case "24h": return now - 86_400;
+    case "1w":  return now - 7 * 86_400;
+    case "1m":  return now - 30 * 86_400;
+    case "3m":  return now - 91 * 86_400;
+    case "1y":  return now - 365 * 86_400;
+    default:    return 0;
+  }
+}
+
+function _updatePnlChart(data) {
+  if (!_pnlChart) return;
+
+  if (!data || data.length === 0) {
+    _pnlChart.data.labels   = [];
+    _pnlChart.data.datasets[0].data = [];
+    _pnlChart.update();
+    return;
+  }
+
+  // Determine chart line color based on net direction of filtered data
+  const lastVal  = data[data.length - 1].cum_pnl;
+  const lineColor = lastVal >= 0 ? "var(--green)" : "var(--red)";
+  _pnlChart.data.datasets[0].borderColor           = lineColor;
+  _pnlChart.data.datasets[0].pointHoverBackgroundColor = lineColor;
+
+  _pnlChart.data.labels = data.map(pt => {
+    const d = new Date(pt.ts * 1000);
+    const mo  = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(d.getUTCDate()).padStart(2, "0");
+    const hr  = String(d.getUTCHours()).padStart(2, "0");
+    const mn  = String(d.getUTCMinutes()).padStart(2, "0");
+    return `${mo}-${day} ${hr}:${mn}`;
+  });
+  _pnlChart.data.datasets[0].data = data.map(pt => pt.cum_pnl);
+  _pnlChart.update();
+}
+
+function setPeriod(period) {
+  _activePeriod = period;
+  // Update button styles
+  document.querySelectorAll(".period-btn").forEach(btn => {
+    btn.classList.toggle("period-btn--active", btn.dataset.period === period);
+  });
+  // Filter and redraw
+  const cutoff  = _cutoffTs(period);
+  const filtered = cutoff ? _pnlHistory.filter(pt => pt.ts >= cutoff) : _pnlHistory;
+  _updatePnlChart(filtered);
+}
+
+async function loadPnlHistory(address) {
+  if (!address) return;
+  try {
+    const data = await apiFetch(`/api/wallet-pnl-history/${encodeURIComponent(address)}`);
+    _pnlHistory = Array.isArray(data) ? data : [];
+    setPeriod(_activePeriod);
+  } catch (_) {
+    // Non-critical — chart stays empty
+    _pnlHistory = [];
+    _updatePnlChart([]);
+  }
+}
+
+// ----------------------------------------------------------------
 // Load wallet from API
 // ----------------------------------------------------------------
 async function loadWallet(address) {
@@ -263,6 +478,9 @@ async function loadWallet(address) {
     const data = await apiFetch(`/api/wallet/${encodeURIComponent(address)}`);
     renderWallet(data);
     showState("content");
+    // Fire background fetches — update cards and chart when ready
+    loadWalletLifetime(address);
+    loadPnlHistory(address);
   } catch (e) {
     if (e.status === 404) {
       setText("walletErrorTitle", "Wallet not found");
@@ -275,6 +493,40 @@ async function loadWallet(address) {
       setText("walletErrorSub", e.message || "Unknown error");
     }
     showState("error");
+  }
+}
+
+// ----------------------------------------------------------------
+// Load lifetime stats from Polymarket APIs (non-blocking overlay)
+// Overwrites the three cards that are wrong when derived from local DB:
+//   wStatAge    ← account createdAt (Gamma /public-profile)
+//   wStatTrades ← lifetime trade count (data-api /traded)
+//   wStatPnl    ← sum of closed-position realizedPnl (data-api /closed-positions)
+// ----------------------------------------------------------------
+async function loadWalletLifetime(address) {
+  try {
+    const s = await apiFetch(`/api/wallet-lifetime/${encodeURIComponent(address)}`);
+
+    // Wallet age — replace "Today" with real account creation date
+    if (s.created_at_ts != null) {
+      setText("wStatAge", fmtAge(s.created_at_ts));
+    }
+
+    // Lifetime trade count
+    if (s.total_traded != null) {
+      setText("wStatTrades", fmtNum(s.total_traded));
+    }
+
+    // Lifetime realized PnL from closed positions
+    if (s.realized_pnl != null) {
+      const pnlEl = document.getElementById("wStatPnl");
+      if (pnlEl) {
+        pnlEl.textContent  = (s.realized_pnl >= 0 ? "+" : "") + fmtUSD(s.realized_pnl);
+        pnlEl.style.color  = s.realized_pnl >= 0 ? "var(--green)" : "var(--red)";
+      }
+    }
+  } catch (_) {
+    // Non-critical — cards retain the local-DB fallback values already displayed
   }
 }
 
@@ -340,6 +592,7 @@ function initSidebar() {
 // ----------------------------------------------------------------
 document.addEventListener("DOMContentLoaded", async () => {
   initSidebar();
+  initPnlChart();
 
   // Load markets for label resolution (non-blocking)
   loadMarkets();
@@ -360,6 +613,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Enter key in search box
   searchInput?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") doSearch();
+  });
+
+  // Period buttons
+  document.querySelectorAll(".period-btn").forEach(btn => {
+    btn.addEventListener("click", () => setPeriod(btn.dataset.period));
   });
 
   // Auto-refresh toggle

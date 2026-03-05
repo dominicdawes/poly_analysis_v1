@@ -40,6 +40,14 @@
       <span class="sidebar-icon">👛</span>
       <span class="sidebar-label">Wallet Analysis</span>
     </a>
+    <a class="sidebar-item" href="/watchlist">
+      <span class="sidebar-icon">👁</span>
+      <span class="sidebar-label">Watchlist</span>
+    </a>
+    <a class="sidebar-item" href="/scanner">
+      <span class="sidebar-icon">🔍</span>
+      <span class="sidebar-label">Scanner</span>
+    </a>
   </nav>
 
   <!-- Page content -->
@@ -92,7 +100,10 @@
           <div id="walletAvatarPlaceholder" class="wallet-avatar-placeholder">◆</div>
         </div>
         <div class="wallet-profile-info">
-          <div class="wallet-display-name" id="walletDisplayName">—</div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <div class="wallet-display-name" id="walletDisplayName">—</div>
+            <button class="eye-btn eye-btn--unwatched" id="walletEyeBtn" title="Add wallet to watchlist" style="display:none">👁</button>
+          </div>
           <div class="wallet-address-mono" id="walletAddressMono">—</div>
           <div class="wallet-bio" id="walletBio" style="display:none"></div>
         </div>
@@ -101,33 +112,56 @@
         </div>
       </div>
 
-      <!-- Overview cards -->
-      <section class="stats-row wallet-stats-row">
-        <div class="stat-card">
-          <div class="stat-label">Wallet Age</div>
-          <div class="stat-value" id="wStatAge">—</div>
+      <!-- Overview: 2×3 stats grid + PnL chart -->
+      <div class="wallet-overview-wrap">
+
+        <!-- Left: 2 rows × 3 cols stat cards -->
+        <div class="wallet-stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">Wallet Age</div>
+            <div class="stat-value" id="wStatAge">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Total Trades</div>
+            <div class="stat-value" id="wStatTrades">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Total Volume</div>
+            <div class="stat-value" id="wStatVolume">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Realized PnL</div>
+            <div class="stat-value" id="wStatPnl">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Avg Trade Size</div>
+            <div class="stat-value" id="wStatAvg">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Largest Trade</div>
+            <div class="stat-value" id="wStatLargest">—</div>
+          </div>
         </div>
-        <div class="stat-card">
-          <div class="stat-label">Total Trades</div>
-          <div class="stat-value" id="wStatTrades">—</div>
+
+        <!-- Right: PnL line chart -->
+        <div class="wallet-chart-panel">
+          <div class="chart-header">
+            <span class="chart-title">Profit / Loss</span>
+            <div class="chart-period-btns">
+              <button class="period-btn period-btn--active" data-period="all">All</button>
+              <button class="period-btn" data-period="1y">1Y</button>
+              <button class="period-btn" data-period="3m">3M</button>
+              <button class="period-btn" data-period="1m">1M</button>
+              <button class="period-btn" data-period="1w">1W</button>
+              <button class="period-btn" data-period="24h">24h</button>
+            </div>
+          </div>
+          <div class="chart-canvas-wrap">
+            <canvas id="pnlChart"></canvas>
+          </div>
         </div>
-        <div class="stat-card">
-          <div class="stat-label">Total Volume</div>
-          <div class="stat-value" id="wStatVolume">—</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Realized PnL</div>
-          <div class="stat-value" id="wStatPnl">—</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Avg Trade Size</div>
-          <div class="stat-value" id="wStatAvg">—</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Largest Trade</div>
-          <div class="stat-value" id="wStatLargest">—</div>
-        </div>
-      </section>
+
+      </div><!-- /wallet-overview-wrap -->
 
       <!-- Active Positions -->
       <div class="panel">
@@ -194,6 +228,8 @@
   };
   window.INITIAL_ADDRESS = {{ address | tojson }};
 </script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script src="/static/js/watchlist.js"></script>
 <script src="/static/js/wallet.js"></script>
 </body>
 </html>

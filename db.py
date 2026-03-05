@@ -35,6 +35,8 @@ class Database:
             os.makedirs(db_dir, exist_ok=True)
         self._create_schema()
         self._extend_schema()
+        self._extend_watchlists_schema()
+        self._extend_tags_schema()
 
     # ----------------------------------------------------------------
     # Connection management
@@ -168,6 +170,85 @@ class Database:
         conn.commit()
         conn.close()
 
+    def _extend_watchlists_schema(self):
+        """Add watchlist tables.  Non-destructive — safe to call on every startup."""
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS watchlists (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT    NOT NULL,
+                type       TEXT    NOT NULL CHECK(type IN ('wallet','market')),
+                is_default INTEGER DEFAULT 0,
+                created_at TEXT    DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS watchlist_items (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                watchlist_id INTEGER REFERENCES watchlists(id) ON DELETE CASCADE,
+                identifier   TEXT    NOT NULL,
+                label        TEXT,
+                added_at     TEXT    DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(watchlist_id, identifier)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_wl_items_list ON watchlist_items(watchlist_id);
+            CREATE INDEX IF NOT EXISTS idx_wl_items_id   ON watchlist_items(identifier);
+        """)
+
+        conn.commit()
+        conn.close()
+
+    def _extend_tags_schema(self):
+        """Add scanner_tags table for persisting Polymarket tag definitions.
+        Non-destructive — safe to call on every startup."""
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS scanner_tags (
+                id       INTEGER PRIMARY KEY,   -- Polymarket tag ID
+                slug     TEXT    NOT NULL UNIQUE,
+                label    TEXT    NOT NULL,
+                added_at TEXT    DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_scanner_tags_label
+                ON scanner_tags(label COLLATE NOCASE);
+        """)
+        conn.commit()
+        conn.close()
+
+    def upsert_tags(self, tags: List[Dict]) -> int:
+        """Bulk-insert new tags, skipping any whose slug already exists.
+
+        Returns the count of newly inserted rows (0 if all were already known).
+        """
+        if not tags:
+            return 0
+        conn = self._get_conn()
+        new_count = 0
+        try:
+            for t in tags:
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO scanner_tags (id, slug, label) VALUES (?, ?, ?)",
+                    (t.get("id"), t["slug"], t["label"]),
+                )
+                new_count += cur.rowcount
+            conn.commit()
+        except Exception as exc:
+            logger.error("upsert_tags failed: %s", exc)
+            conn.rollback()
+        return new_count
+
+    def get_all_tags(self) -> List[Dict]:
+        """Return all stored tags sorted alphabetically by label."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT id, slug, label FROM scanner_tags ORDER BY label COLLATE NOCASE ASC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def verify_schema(self) -> bool:
         """Return True if all required tables exist."""
         conn = sqlite3.connect(self.db_path)
@@ -176,7 +257,10 @@ class Database:
         ).fetchall()
         conn.close()
         existing = {r[0] for r in rows}
-        return {"trades", "traders", "wallets", "markets", "positions"}.issubset(existing)
+        return {
+            "trades", "traders", "wallets", "markets", "positions",
+            "watchlists", "watchlist_items",
+        }.issubset(existing)
 
     # ----------------------------------------------------------------
     # Writes
@@ -646,3 +730,241 @@ class Database:
             logger.error("delete_trades_for_market failed: %s", exc)
             conn.rollback()
             return 0
+
+    # ================================================================
+    # Watchlists
+    # ================================================================
+
+    def ensure_default_watchlists(self) -> None:
+        """Create the two default watchlists if none exist of each type."""
+        conn = self._get_conn()
+        try:
+            for wl_type, name in [("wallet", "Default Wallets"), ("market", "Default Markets")]:
+                existing = conn.execute(
+                    "SELECT id FROM watchlists WHERE type = ? AND is_default = 1", (wl_type,)
+                ).fetchone()
+                if not existing:
+                    conn.execute(
+                        "INSERT INTO watchlists (name, type, is_default) VALUES (?, ?, 1)",
+                        (name, wl_type),
+                    )
+            conn.commit()
+        except Exception as exc:
+            logger.error("ensure_default_watchlists failed: %s", exc)
+            conn.rollback()
+
+    def get_watchlists(self, type_: Optional[str] = None) -> List[Dict]:
+        """Return all watchlists, optionally filtered by type."""
+        conn = self._get_conn()
+        if type_:
+            rows = conn.execute(
+                "SELECT * FROM watchlists WHERE type = ? ORDER BY is_default DESC, created_at ASC",
+                (type_,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM watchlists ORDER BY type, is_default DESC, created_at ASC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def create_watchlist(self, name: str, type_: str) -> Optional[Dict]:
+        """Create a new watchlist. Returns the new row or None on failure."""
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                "INSERT INTO watchlists (name, type, is_default) VALUES (?, ?, 0)",
+                (name, type_),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM watchlists WHERE id = last_insert_rowid()"
+            ).fetchone()
+            return dict(row) if row else None
+        except Exception as exc:
+            logger.error("create_watchlist failed: %s", exc)
+            conn.rollback()
+            return None
+
+    def rename_watchlist(self, wl_id: int, name: str) -> bool:
+        """Rename a watchlist. Returns True on success."""
+        conn = self._get_conn()
+        try:
+            conn.execute("UPDATE watchlists SET name = ? WHERE id = ?", (name, wl_id))
+            conn.commit()
+            return conn.execute("SELECT changes()").fetchone()[0] > 0
+        except Exception as exc:
+            logger.error("rename_watchlist failed: %s", exc)
+            conn.rollback()
+            return False
+
+    def delete_watchlist(self, wl_id: int) -> bool:
+        """
+        Delete a watchlist and its items.
+        Returns False (without deleting) if is_default = 1.
+        """
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT is_default FROM watchlists WHERE id = ?", (wl_id,)
+        ).fetchone()
+        if not row:
+            return False
+        if row["is_default"]:
+            return False
+        try:
+            conn.execute("DELETE FROM watchlists WHERE id = ?", (wl_id,))
+            conn.commit()
+            return True
+        except Exception as exc:
+            logger.error("delete_watchlist failed: %s", exc)
+            conn.rollback()
+            return False
+
+    def get_watchlist_items(self, wl_id: int) -> List[Dict]:
+        """Return all items in a watchlist, newest first."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM watchlist_items WHERE watchlist_id = ? ORDER BY added_at DESC",
+            (wl_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def add_watchlist_item(
+        self,
+        wl_id: int,
+        identifier: str,
+        label: Optional[str] = None,
+    ) -> Optional[Dict]:
+        """
+        Add an item to a watchlist.
+        Returns the inserted/existing row dict, or None on failure.
+        """
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO watchlist_items (watchlist_id, identifier, label)
+                VALUES (?, ?, ?)
+                """,
+                (wl_id, identifier, label),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM watchlist_items WHERE watchlist_id = ? AND identifier = ?",
+                (wl_id, identifier),
+            ).fetchone()
+            return dict(row) if row else None
+        except Exception as exc:
+            logger.error("add_watchlist_item failed: %s", exc)
+            conn.rollback()
+            return None
+
+    def remove_watchlist_item(self, item_id: int) -> bool:
+        """Delete a watchlist item by its row id. Returns True on success."""
+        conn = self._get_conn()
+        try:
+            conn.execute("DELETE FROM watchlist_items WHERE id = ?", (item_id,))
+            conn.commit()
+            return conn.execute("SELECT changes()").fetchone()[0] > 0
+        except Exception as exc:
+            logger.error("remove_watchlist_item failed: %s", exc)
+            conn.rollback()
+            return False
+
+    def move_watchlist_item(self, item_id: int, to_wl_id: int) -> bool:
+        """Move an item to a different watchlist. Returns True on success."""
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                "UPDATE watchlist_items SET watchlist_id = ? WHERE id = ?",
+                (to_wl_id, item_id),
+            )
+            conn.commit()
+            return conn.execute("SELECT changes()").fetchone()[0] > 0
+        except Exception as exc:
+            # UNIQUE constraint violation (item already in target list)
+            logger.warning("move_watchlist_item failed (may be duplicate): %s", exc)
+            conn.rollback()
+            return False
+
+    def get_watchlist_status(self, type_: str, identifier: str) -> Dict:
+        """
+        Return {is_watched: bool, watchlist_ids: [int, ...]} for an identifier
+        across all watchlists of the given type.
+        """
+        conn = self._get_conn()
+        rows = conn.execute(
+            """
+            SELECT wi.watchlist_id
+            FROM watchlist_items wi
+            JOIN watchlists wl ON wl.id = wi.watchlist_id
+            WHERE wl.type = ? AND wi.identifier = ?
+            """,
+            (type_, identifier),
+        ).fetchall()
+        ids = [r[0] for r in rows]
+        return {"is_watched": len(ids) > 0, "watchlist_ids": ids}
+
+    def get_watchlist_enriched(self, wl_id: int) -> List[Dict]:
+        """
+        Return watchlist items enriched with local-DB stats.
+        The watchlist type determines which table to join:
+          wallet → wallets
+          market → markets + aggregate volume from trades
+        """
+        conn = self._get_conn()
+
+        # Determine watchlist type
+        wl_row = conn.execute(
+            "SELECT type FROM watchlists WHERE id = ?", (wl_id,)
+        ).fetchone()
+        if not wl_row:
+            return []
+
+        wl_type = wl_row["type"]
+
+        if wl_type == "wallet":
+            rows = conn.execute(
+                """
+                SELECT
+                    wi.id,
+                    wi.watchlist_id,
+                    wi.identifier,
+                    wi.label,
+                    wi.added_at,
+                    COALESCE(w.pseudonym, w.name, wi.identifier) AS display_name,
+                    w.first_seen,
+                    w.last_seen,
+                    w.realized_pnl,
+                    w.total_trades,
+                    w.num_active_positions
+                FROM watchlist_items wi
+                LEFT JOIN wallets w ON w.address = wi.identifier
+                WHERE wi.watchlist_id = ?
+                ORDER BY wi.added_at DESC
+                """,
+                (wl_id,),
+            ).fetchall()
+        else:
+            # Markets — volume from trades
+            rows = conn.execute(
+                """
+                SELECT
+                    wi.id,
+                    wi.watchlist_id,
+                    wi.identifier,
+                    wi.label,
+                    wi.added_at,
+                    COALESCE(m.title, wi.identifier) AS display_name,
+                    m.category,
+                    m.end_date,
+                    m.resolved,
+                    (SELECT SUM(t.amount) FROM trades t WHERE t.market_id = wi.identifier) AS total_volume
+                FROM watchlist_items wi
+                LEFT JOIN markets m ON m.condition_id = wi.identifier
+                WHERE wi.watchlist_id = ?
+                ORDER BY wi.added_at DESC
+                """,
+                (wl_id,),
+            ).fetchall()
+
+        return [dict(r) for r in rows]

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Poly Analysis — Watchlist</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+
+<!-- ============================================================
+     Header
+============================================================ -->
+<header class="header">
+  <div class="header-left">
+    <button class="sidebar-toggle btn btn--ghost btn--sm" id="sidebarToggle" aria-label="Toggle sidebar">☰</button>
+    <span class="logo">◆ Poly Analysis</span>
+  </div>
+  <div class="header-right"></div>
+</header>
+
+<!-- ============================================================
+     Layout: sidebar + main
+============================================================ -->
+<div class="layout" id="layout">
+
+  <!-- Sidebar nav -->
+  <nav class="sidebar" id="sidebar">
+    <a class="sidebar-item" href="/">
+      <span class="sidebar-icon">📈</span>
+      <span class="sidebar-label">Live Trades</span>
+    </a>
+    <a class="sidebar-item" href="/wallet-dashboard">
+      <span class="sidebar-icon">👛</span>
+      <span class="sidebar-label">Wallet Analysis</span>
+    </a>
+    <a class="sidebar-item sidebar-item--active" href="/watchlist">
+      <span class="sidebar-icon">👁</span>
+      <span class="sidebar-label">Watchlist</span>
+    </a>
+    <a class="sidebar-item" href="/scanner">
+      <span class="sidebar-icon">🔍</span>
+      <span class="sidebar-label">Scanner</span>
+    </a>
+  </nav>
+
+  <!-- Page content -->
+  <main class="main" style="padding-top:16px">
+
+    <!-- Sub-tabs: Wallets / Markets -->
+    <div class="wl-tabs" id="wlTabs">
+      <button class="wl-tab wl-tab--active" data-type="wallet">👛 Wallets</button>
+      <button class="wl-tab" data-type="market">📈 Markets</button>
+    </div>
+
+    <!-- Watchlist selector pills -->
+    <div class="wl-selector" id="wlSelector">
+      <!-- Pills rendered by JS -->
+    </div>
+
+    <!-- Toolbar: create new watchlist -->
+    <div class="wl-toolbar" id="wlToolbar">
+      <button class="btn btn--sm btn--outline" id="wlNewBtn">+ New Watchlist</button>
+      <div class="wl-new-form" id="wlNewForm" style="display:none">
+        <input
+          type="text"
+          id="wlNewInput"
+          class="wallet-search-input"
+          placeholder="Watchlist name…"
+          maxlength="60"
+          spellcheck="false"
+        />
+        <button class="btn btn--sm btn--primary" id="wlNewConfirm">Create</button>
+        <button class="btn btn--sm btn--ghost" id="wlNewCancel">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Watchlist actions (rename / delete active list) -->
+    <div class="wl-actions" id="wlActions" style="display:none">
+      <button class="btn btn--sm btn--ghost" id="wlRenameBtn">Rename</button>
+      <button class="btn btn--sm btn--ghost" id="wlDeleteBtn" style="color:var(--red)">Delete</button>
+    </div>
+
+    <!-- Cards container -->
+    <div class="wl-cards" id="wlCards">
+      <div class="wl-empty" id="wlEmpty" style="display:none">
+        <div class="wallet-empty-icon">👁</div>
+        <div class="wallet-empty-title">Nothing here yet</div>
+        <div class="wallet-empty-sub">
+          Add items using the eye icon on the<br>
+          <a href="/">Live Trades</a> or <a href="/wallet-dashboard">Wallet Analysis</a> pages.
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div><!-- /layout -->
+
+<!-- Toast -->
+<div id="toastContainer" class="toast-container"></div>
+
+<script>
+  window.APP_CONFIG = { whaleThreshold: {{ whale_threshold }} };
+  window.WL_PAGE = true;  // signals watchlist.js to run page init
+</script>
+<script src="/static/js/watchlist.js"></script>
+</body>
+</html>

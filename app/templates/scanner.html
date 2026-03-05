@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Poly Analysis — Market Scanner</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+
+<!-- ============================================================
+     Header
+============================================================ -->
+<header class="header">
+  <div class="header-left">
+    <button class="sidebar-toggle btn btn--ghost btn--sm" id="sidebarToggle" aria-label="Toggle sidebar">☰</button>
+    <span class="logo">◆ Poly Analysis</span>
+  </div>
+  <div class="header-right"></div>
+</header>
+
+<!-- ============================================================
+     Layout: sidebar + main
+============================================================ -->
+<div class="layout" id="layout">
+
+  <!-- Sidebar nav -->
+  <nav class="sidebar" id="sidebar">
+    <a class="sidebar-item" href="/">
+      <span class="sidebar-icon">📈</span>
+      <span class="sidebar-label">Live Trades</span>
+    </a>
+    <a class="sidebar-item" href="/wallet-dashboard">
+      <span class="sidebar-icon">👛</span>
+      <span class="sidebar-label">Wallet Analysis</span>
+    </a>
+    <a class="sidebar-item" href="/watchlist">
+      <span class="sidebar-icon">👁</span>
+      <span class="sidebar-label">Watchlist</span>
+    </a>
+    <a class="sidebar-item sidebar-item--active" href="/scanner">
+      <span class="sidebar-icon">🔍</span>
+      <span class="sidebar-label">Scanner</span>
+    </a>
+  </nav>
+
+  <!-- Page content -->
+  <main class="main" style="padding-top:16px">
+
+    <div class="scanner-layout">
+
+      <!-- ══════════════════════════════════════════════════════
+           Filter panel
+      ══════════════════════════════════════════════════════ -->
+      <aside class="scanner-filters" id="scannerFilters">
+
+        <!-- Text search -->
+        <div class="filter-section">
+          <label class="filter-label">Search</label>
+          <input
+            type="text"
+            id="scanQ"
+            class="wallet-search-input"
+            placeholder="Event title or market question…"
+            spellcheck="false"
+            autocomplete="off"
+          />
+        </div>
+
+        <!-- ── Event filters ── -->
+        <div class="filter-section-header">Event Filters</div>
+
+        <!-- Include tags -->
+        <div class="filter-section">
+          <label class="filter-label">Include Tags</label>
+          <div class="tag-filter-wrap" id="includeTagWrap">
+            <div class="tag-pills" id="includeTagPills"></div>
+            <div class="tag-input-row">
+              <input
+                type="text"
+                id="includeTagInput"
+                class="tag-search-input"
+                placeholder="Add tag…"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </div>
+            <div class="tag-dropdown" id="includeTagDropdown" style="display:none"></div>
+          </div>
+        </div>
+
+        <!-- Exclude tags -->
+        <div class="filter-section">
+          <label class="filter-label">Exclude Tags</label>
+          <div class="tag-filter-wrap tag-filter-wrap--exclude" id="excludeTagWrap">
+            <div class="tag-pills" id="excludeTagPills"></div>
+            <div class="tag-input-row">
+              <input
+                type="text"
+                id="excludeTagInput"
+                class="tag-search-input"
+                placeholder="Add tag to exclude…"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </div>
+            <div class="tag-dropdown" id="excludeTagDropdown" style="display:none"></div>
+          </div>
+        </div>
+
+        <!-- Event status -->
+        <div class="filter-section">
+          <label class="filter-label">Event Status</label>
+          <div class="scan-radio-group">
+            <label><input type="radio" name="scanEventStatus" value="all" checked /> All</label>
+            <label><input type="radio" name="scanEventStatus" value="active" /> Active</label>
+            <label><input type="radio" name="scanEventStatus" value="closed" /> Closed</label>
+          </div>
+        </div>
+
+        <!-- ── Market filters ── -->
+        <div class="filter-section-header">Market Filters</div>
+
+        <!-- Market volume dual-range -->
+        <div class="filter-section">
+          <label class="filter-label">
+            Volume ($)
+            <span class="filter-label-range" id="volRangeLabel">Any</span>
+          </label>
+          <div class="dual-range" id="volRange">
+            <div class="range-track"><div class="range-fill" id="volFill"></div></div>
+            <input type="range" class="range-lower" id="volLow"  min="0" max="10000000" value="0"        step="1000" />
+            <input type="range" class="range-upper" id="volHigh" min="0" max="10000000" value="10000000" step="1000" />
+          </div>
+        </div>
+
+        <!-- Market liquidity dual-range -->
+        <div class="filter-section">
+          <label class="filter-label">
+            Liquidity ($)
+            <span class="filter-label-range" id="liqRangeLabel">Any</span>
+          </label>
+          <div class="dual-range" id="liqRange">
+            <div class="range-track"><div class="range-fill" id="liqFill"></div></div>
+            <input type="range" class="range-lower" id="liqLow"  min="0" max="5000000" value="0"       step="500" />
+            <input type="range" class="range-upper" id="liqHigh" min="0" max="5000000" value="5000000" step="500" />
+          </div>
+        </div>
+
+        <!-- Max spread -->
+        <div class="filter-section">
+          <label class="filter-label">Max Spread (%)</label>
+          <div style="display:flex;align-items:center;gap:6px">
+            <input
+              type="number"
+              id="scanMaxSpread"
+              class="filter-input"
+              placeholder="e.g. 5"
+              min="0"
+              max="100"
+              step="0.5"
+              style="width:80px"
+            />
+            <span style="font-size:11px;color:var(--text-muted)">Leave blank for any</span>
+          </div>
+        </div>
+
+        <!-- Market status -->
+        <div class="filter-section">
+          <label class="filter-label">Market Status</label>
+          <div class="scan-radio-group">
+            <label><input type="radio" name="scanMktStatus" value="all" checked /> All</label>
+            <label><input type="radio" name="scanMktStatus" value="active" /> Active</label>
+            <label><input type="radio" name="scanMktStatus" value="closed" /> Closed</label>
+          </div>
+        </div>
+
+        <!-- ── Sort ── -->
+        <div class="filter-section-header">Sort</div>
+
+        <div class="filter-section">
+          <select id="scanSortBy" class="filter-select">
+            <option value="volume">Total Volume</option>
+            <option value="volume24hr">24h Volume</option>
+            <option value="liquidity">Liquidity</option>
+            <option value="end_date">End Date</option>
+          </select>
+          <select id="scanSortDir" class="filter-select" style="margin-top:6px">
+            <option value="desc">Highest first</option>
+            <option value="asc">Lowest first</option>
+          </select>
+        </div>
+
+        <!-- Action buttons -->
+        <div class="filter-actions">
+          <button class="btn btn--primary btn--sm" id="scanBtn">Scan</button>
+          <button class="btn btn--ghost btn--sm" id="scanResetBtn">Reset</button>
+        </div>
+
+      </aside><!-- /scanner-filters -->
+
+      <!-- ══════════════════════════════════════════════════════
+           Results area
+      ══════════════════════════════════════════════════════ -->
+      <div class="scanner-results" id="scannerResults">
+
+        <!-- Empty / welcome state -->
+        <div class="scanner-empty" id="scannerEmpty">
+          <div class="wallet-empty-icon">🔍</div>
+          <div class="wallet-empty-title">Market Scanner</div>
+          <div class="wallet-empty-sub">
+            Apply filters and click <b>Scan</b> to search all Polymarket events.<br>
+            Tag filters narrow events; volume, liquidity and spread narrow individual markets within each event.
+          </div>
+        </div>
+
+        <!-- Results panel (shown after first scan) -->
+        <div id="scannerPanel" style="display:none">
+
+          <!-- Header: count + cache info + cancel -->
+          <div class="scanner-results-header">
+            <span id="scanResultCount"></span>
+            <span id="scanCacheInfo" class="dim" style="font-size:11px"></span>
+            <button class="btn btn--sm btn--ghost" id="scanCancelBtn" style="display:none">✕ Cancel</button>
+          </div>
+
+          <!-- Event cards -->
+          <div class="scanner-events" id="scannerEvents"></div>
+
+          <!-- Pagination -->
+          <div class="scanner-pagination" id="scannerPagination"></div>
+
+        </div><!-- /scannerPanel -->
+
+      </div><!-- /scanner-results -->
+
+    </div><!-- /scanner-layout -->
+
+  </main>
+</div><!-- /layout -->
+
+<!-- Toast -->
+<div id="toastContainer" class="toast-container"></div>
+
+<script>
+  window.APP_CONFIG = { whaleThreshold: {{ whale_threshold }} };
+</script>
+<script src="/static/js/watchlist.js"></script>
+<script src="/static/js/scanner.js"></script>
+</body>
+</html>

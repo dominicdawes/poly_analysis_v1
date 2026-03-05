@@ -417,6 +417,24 @@ function _updateMarketBadge(title, condId) {
   if (!badge) return;
   badge.textContent = title.length > 30 ? title.slice(0, 28) + "…" : title;
   badge.title = condId;
+  _refreshMarketEye(condId, title);
+}
+
+function _refreshMarketEye(condId, title) {
+  const eyeBtn = document.getElementById("marketEyeBtn");
+  if (!eyeBtn || !window.WL) return;
+  eyeBtn.style.display = "";
+  window.WL.checkWatchStatus("market", condId).then(status => {
+    eyeBtn.classList.toggle("eye-btn--watched",   status.is_watched);
+    eyeBtn.classList.toggle("eye-btn--unwatched", !status.is_watched);
+    eyeBtn.innerHTML = status.is_watched
+      ? "Watchlist 👁"
+      : "Add Market to Watchlist 👁";
+    // Re-wire click each time the market changes
+    eyeBtn.onclick = () => {
+      window.WL.showAddModal("market", condId, title, () => _refreshMarketEye(condId, title));
+    };
+  });
 }
 
 // Render the multi-outcome tab picker.  Pass empty/single markets to hide it.
@@ -477,6 +495,13 @@ document.addEventListener("DOMContentLoaded", () => {
   // Initial load
   refresh();
   scheduleRefresh();
+
+  // Show market eye button if a market is pre-configured
+  if (CFG.marketId && window.WL) {
+    const badge = document.getElementById("marketBadge");
+    const title = badge ? badge.textContent : CFG.marketId;
+    _refreshMarketEye(CFG.marketId, title);
+  }
 
   // Manual refresh
   document.getElementById("refreshBtn")?.addEventListener("click", async () => {
