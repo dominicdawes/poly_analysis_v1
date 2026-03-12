@@ -831,13 +831,13 @@ td.empty {
   margin-bottom: 20px;
 }
 
-/* Left panel: 3-column, 2-row stat grid */
+/* Left panel: 4-column stat grid (2 rows × 4 = 8 cards) */
 .wallet-stats-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(2, auto);
+  grid-template-columns: repeat(4, 1fr);
   gap: 12px;
-  flex: 0 0 auto;
+  flex: 1;
+  min-width: 0;
   align-content: start;
 }
 
@@ -906,12 +906,23 @@ td.empty {
 /* Responsive collapse: stack vertically below 900px */
 @media (max-width: 900px) {
   .wallet-overview-wrap { flex-direction: column; }
-  .wallet-stats-grid    { grid-template-columns: repeat(3, 1fr); }
+  .wallet-stats-grid    { grid-template-columns: repeat(4, 1fr); }
   .wallet-chart-panel   { min-height: 200px; }
 }
 
 @media (max-width: 600px) {
   .wallet-stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Live-only banner (wallet not in local DB) */
+.wallet-live-banner {
+  background: rgba(210, 153, 34, 0.1);
+  border: 1px solid rgba(210, 153, 34, 0.35);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
 }
 
 /* Empty / error states */
@@ -941,8 +952,114 @@ td.empty {
   line-height: 1.6;
 }
 
-/* Positions table spacing */
-.wallet-trades-panel { margin-top: 14px; }
+/* ── Positions | Activity section tabs ─────────────────────────── */
+.wallet-section-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  margin-top: 20px;
+  margin-bottom: 0;
+}
+.wallet-section-tab {
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.wallet-section-tab:hover { color: var(--text); }
+.wallet-section-tab--active {
+  color: var(--text);
+  border-bottom-color: var(--green);
+}
+
+/* ── Positions controls row (toggle + market filter) ────────────── */
+.pos-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.pos-status-toggle {
+  display: flex;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 2px;
+  gap: 2px;
+}
+.pos-status-btn {
+  padding: 4px 16px;
+  border-radius: 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.pos-status-btn--active {
+  background: var(--bg-card);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+}
+
+/* ── Market filter dropdown ─────────────────────────────────────── */
+.market-filter-wrap { position: relative; }
+.market-filter-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.market-filter-btn:hover { background: var(--bg-hover); color: var(--text); }
+.market-filter-caret { font-size: 9px; opacity: 0.7; }
+.market-filter-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 270px;
+  max-height: 300px;
+  overflow-y: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+  z-index: 200;
+  padding: 5px 0;
+}
+.market-filter-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+.market-filter-option:hover { background: var(--bg-hover); }
+.market-filter-all { font-weight: 500; }
+.market-filter-divider { height: 1px; background: var(--border); margin: 4px 0; }
+.market-filter-empty { padding: 10px 14px; font-size: 12px; color: var(--text-muted); }
+
+/* ── WON / LOST / BREAK-EVEN result badges ──────────────────────── */
+.badge--won       { background: rgba(63,185,80,0.15);    color: var(--green);      font-weight: 600; }
+.badge--lost      { background: rgba(248,81,73,0.15);    color: var(--red);        font-weight: 600; }
+.badge--neutral   { background: rgba(139,148,158,0.12);  color: var(--text-muted); font-weight: 600; }
 
 /* Monospace small (condition IDs, tx hashes) */
 .mono-sm {
@@ -1472,6 +1589,82 @@ td.empty {
   width: 100%;
 }
 
+/* ── Hybrid range (number input + slider + number input) ─────────── */
+.hybrid-range-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Stretch the dual-range to fill available space inside the hybrid wrap */
+.hybrid-range-wrap .dual-range { flex: 1; }
+
+/* Number box: blends into bg; becomes editable input on focus */
+.range-numbox {
+  width: 56px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: inherit;
+  text-align: center;
+  outline: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px 3px 0 0;
+  transition: color 0.15s, border-color 0.15s, background 0.12s;
+}
+.range-numbox:hover:not(:focus) {
+  color: var(--text);
+  border-bottom-color: var(--border);
+}
+.range-numbox:focus {
+  color: var(--text);
+  background: rgba(255,255,255,0.05);
+  border-bottom-color: var(--green);
+  cursor: text;
+}
+
+/* ── Market-count checkbox group ──────────────────────────────────── */
+.scan-checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.scan-checkbox-group label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.scan-checkbox-group label:hover { color: var(--text); }
+.scan-checkbox-group input[type="checkbox"] { cursor: pointer; accent-color: var(--green); }
+
+.end-date-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  width: 38px;
+  flex-shrink: 0;
+}
+.filter-input--date {
+  flex: 1;
+  font-size: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 3px 6px;
+  color-scheme: dark;
+}
+.filter-input--date:focus {
+  outline: none;
+  border-color: var(--green);
+}
+
 /* Scanner results */
 .scanner-results {
   flex: 1;
@@ -1492,6 +1685,32 @@ td.empty {
   color: var(--text-muted);
   flex-wrap: wrap;
 }
+
+/* ── Row / Grid view toggle ─────────────────────────────────────── */
+.view-toggle {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px;
+}
+.view-toggle-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.view-toggle-btn:hover { color: var(--text); background: var(--bg-hover); }
+.view-toggle-btn--active { background: var(--bg-card); color: var(--text); }
 
 .scanner-table-wrap {
   overflow-x: auto;
@@ -1755,26 +1974,17 @@ td.empty {
   gap: 6px;
 }
 
-.event-card-title-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
 .event-card-title {
   font-size: 13px;
   font-weight: 600;
   color: var(--text);
   line-height: 1.35;
-  flex: 1;
 }
 
 .event-card-badges {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  flex-shrink: 0;
 }
 
 .event-card-meta {
@@ -1788,6 +1998,32 @@ td.empty {
 
 .event-card-meta b { color: var(--text); }
 
+/* ── Grid view mode ─────────────────────────────────────────────── */
+.scanner-events--grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+/* Each card is a fixed-height column: header + scrollable markets */
+.scanner-events--grid .event-card {
+  height: 480px;
+  display: flex;
+  flex-direction: column;
+}
+.scanner-events--grid .event-card-header { flex-shrink: 0; }
+.scanner-events--grid .event-markets {
+  flex: 1;
+  height: auto;      /* override the 350px fixed height used in row mode */
+}
+
+@media (max-width: 1100px) {
+  .scanner-events--grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 700px) {
+  .scanner-events--grid { grid-template-columns: 1fr; }
+}
+
 /* ================================================================
    Scanner — market cards (nested inside event cards)
 ================================================================ */
@@ -1797,7 +2033,12 @@ td.empty {
   flex-direction: column;
   gap: 8px;
   background: rgba(0,0,0,0.15);
+  /* Fixed height shows ~3.5 market cards; hidden scrollbar hints there is more below */
+  height: 350px;
+  overflow-y: auto;
+  scrollbar-width: none;        /* Firefox */
 }
+.event-markets::-webkit-scrollbar { display: none; } /* Chrome / Safari */
 
 .market-card {
   background: var(--bg-card);
@@ -1903,6 +2144,80 @@ td.empty {
 .scanner-no-results {
   text-align: center;
   padding: 40px 20px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ================================================================
+   Wallet — pagination, result counts, market links, page-size
+================================================================ */
+
+/* Clickable market name in positions / activity tables */
+.market-link {
+  color: var(--text);
+  text-decoration: none;
+  transition: color 0.12s;
+}
+.market-link:hover { color: var(--green); text-decoration: underline; }
+
+/* Result count line above a table */
+.table-result-count {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 6px 16px 4px;
+}
+
+/* Page-size picker inside pos-controls / activity-controls */
+.table-page-size-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.filter-select-sm {
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+/* Pagination row below tables */
+.table-pagination {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  padding: 10px 0;
+  flex-wrap: wrap;
+}
+.pag-btn {
+  min-width: 32px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  transition: all 0.12s;
+}
+.pag-btn:hover:not([disabled]) { background: var(--bg-hover); color: var(--text); }
+.pag-btn--active {
+  background: var(--green-dim);
+  border-color: var(--green);
+  color: var(--green);
+  font-weight: 600;
+}
+.pag-btn[disabled] { opacity: 0.3; cursor: default; }
+.pag-ellipsis {
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
   color: var(--text-muted);
   font-size: 13px;
 }

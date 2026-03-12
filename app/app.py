@@ -397,12 +397,18 @@ def create_app(
         event_status: str,
         tags: list,
         exclude_tags: list,
+        min_event_vol,
+        max_event_vol,
+        end_date_filter: str,
+        end_date_after: str | None,
+        end_date_before: str | None,
         market_status: str,
         min_market_vol,
         max_market_vol,
         min_market_liq,
         max_market_liq,
         max_spread,
+        min_markets: int | None,
         sort_by: str,
         sort_dir: str,
         page: int,
@@ -457,6 +463,27 @@ def create_app(
                     for t in (e.get("tags") or [])
                 )
             result = [e for e in result if _lacks_excl_tag(e)]
+
+        # Event-level volume filter
+        if min_event_vol is not None:
+            result = [e for e in result if float(e.get("volume") or 0) >= min_event_vol]
+        if max_event_vol is not None:
+            result = [e for e in result if float(e.get("volume") or 0) <= max_event_vol]
+
+        # End date filter
+        if end_date_filter == "has":
+            result = [e for e in result if e.get("endDate")]
+        elif end_date_filter == "none":
+            result = [e for e in result if not e.get("endDate")]
+        if end_date_after:
+            # ISO string comparison works because dates start YYYY-MM-DD
+            result = [e for e in result if (e.get("endDate") or "")[:10] >= end_date_after]
+        if end_date_before:
+            result = [e for e in result if e.get("endDate") and (e.get("endDate") or "")[:10] <= end_date_before]
+
+        # Market count filter (applied before Phase 2 market-level trimming)
+        if min_markets:
+            result = [e for e in result if len(e.get("markets") or []) >= min_markets]
 
         # ── Phase 2: market-level ─────────────────────────────────────
         has_mkt_filter = any(x is not None for x in [
@@ -620,10 +647,12 @@ def create_app(
 
     @app.route("/wallet-dashboard")
     def wallet_dashboard():
-        address = request.args.get("address", "")
+        address   = request.args.get("address", "")
+        market_id = request.args.get("market_id", "")
         return render_template(
             "wallet_dashboard.html",
             address=address,
+            market_id=market_id,
             whale_threshold=config.whale_threshold,
         )
 
@@ -643,10 +672,29 @@ def create_app(
     def api_wallet(address: str):
         wallet = db.get_wallet(address)
         if wallet is None:
+            # Wallet not in local DB (hasn't traded in the monitored market).
+            # Return a stub so the frontend can still load profile + PnL chart
+            # from Polymarket's live APIs via the /api/wallet-lifetime and
+            # /api/wallet-pnl-history endpoints.
             return jsonify({
-                "error": "No data found for this wallet. "
-                         "It may not have any trades yet or the analyzer hasn't run."
-            }), 404
+                "wallet": {
+                    "address":           address,
+                    "name":              None,
+                    "pseudonym":         None,
+                    "profile_image":     None,
+                    "bio":               None,
+                    "first_seen":        None,
+                    "last_seen":         None,
+                    "total_trades":      None,
+                    "total_volume":      None,
+                    "avg_trade_size":    None,
+                    "largest_trade":     None,
+                    "realized_pnl":      None,
+                },
+                "positions": [],
+                "trades":    [],
+                "_source":   "live",  # signals frontend: data comes from Polymarket API only
+            }), 200
 
         positions = db.get_positions_for_wallet(address)
         trades    = db.get_recent_trades(
@@ -659,6 +707,7 @@ def create_app(
             "wallet":    wallet,
             "positions": positions,
             "trades":    trades,
+            "_source":   "local",
         })
 
     # ----------------------------------------------------------------
@@ -685,18 +734,22 @@ def create_app(
             r.raise_for_status()
             d = r.json()
             if not isinstance(d, dict) or not d:
-                return None
+                return {}
+            out = {
+                "pseudonym":     d.get("name"),
+                "profile_image": d.get("profileImage"),
+                "bio":           d.get("bio"),
+                "created_at_ts": None,
+            }
             raw = d.get("createdAt")
             if raw:
                 try:
-                    return int(
-                        datetime.fromisoformat(
-                            raw.replace("Z", "+00:00")
-                        ).timestamp()
+                    out["created_at_ts"] = int(
+                        datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
                     )
                 except ValueError:
                     pass
-            return None
+            return out
 
         def _fetch_traded():
             r = requests.get(
@@ -729,19 +782,28 @@ def create_app(
             "created_at_ts": None,
             "total_traded":  None,
             "realized_pnl":  None,
+            "pseudonym":     None,
+            "profile_image": None,
+            "bio":           None,
         }
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-            futures = {
-                "created_at_ts": pool.submit(_fetch_profile),
-                "total_traded":  pool.submit(_fetch_traded),
-                "realized_pnl":  pool.submit(_fetch_pnl),
-            }
-            for key, fut in futures.items():
-                try:
-                    result[key] = fut.result(timeout=18)
-                except Exception as exc:
-                    logger.warning("wallet-lifetime %s %s: %s", address, key, exc)
+            fut_profile = pool.submit(_fetch_profile)
+            fut_traded  = pool.submit(_fetch_traded)
+            fut_pnl     = pool.submit(_fetch_pnl)
+
+            try:
+                result.update(fut_profile.result(timeout=18))
+            except Exception as exc:
+                logger.warning("wallet-lifetime %s profile: %s", address, exc)
+            try:
+                result["total_traded"] = fut_traded.result(timeout=18)
+            except Exception as exc:
+                logger.warning("wallet-lifetime %s traded: %s", address, exc)
+            try:
+                result["realized_pnl"] = fut_pnl.result(timeout=18)
+            except Exception as exc:
+                logger.warning("wallet-lifetime %s pnl: %s", address, exc)
 
         return jsonify(result)
 
@@ -794,6 +856,55 @@ def create_app(
             result.append({"ts": pt["ts"], "pnl": round(pt["pnl"], 4), "cum_pnl": round(cum, 4)})
 
         return jsonify(result)
+
+    # ----------------------------------------------------------------
+    # API — wallet open / closed positions (sourced live from Polymarket)
+    # ----------------------------------------------------------------
+
+    @app.route("/api/wallet-positions/<address>")
+    def api_wallet_positions(address: str):
+        status = request.args.get("status", "active").lower()
+        try:
+            if status == "closed":
+                r = requests.get(
+                    f"{_DATA_API_BASE}/closed-positions",
+                    params={"user": address, "limit": 100},
+                    headers=_REQ_HEADERS,
+                    timeout=15,
+                )
+            else:
+                r = requests.get(
+                    f"{_DATA_API_BASE}/positions",
+                    params={"user": address, "sizeThreshold": 0.1},
+                    headers=_REQ_HEADERS,
+                    timeout=15,
+                )
+            r.raise_for_status()
+            data = r.json()
+            return jsonify(data if isinstance(data, list) else [])
+        except Exception as exc:
+            logger.warning("wallet-positions %s %s: %s", address, status, exc)
+            return jsonify([])
+
+    # ----------------------------------------------------------------
+    # API — wallet activity feed (sourced live from Polymarket)
+    # ----------------------------------------------------------------
+
+    @app.route("/api/wallet-activity/<address>")
+    def api_wallet_activity(address: str):
+        try:
+            r = requests.get(
+                f"{_DATA_API_BASE}/activity",
+                params={"user": address, "limit": 200},
+                headers=_REQ_HEADERS,
+                timeout=15,
+            )
+            r.raise_for_status()
+            data = r.json()
+            return jsonify(data if isinstance(data, list) else [])
+        except Exception as exc:
+            logger.warning("wallet-activity %s: %s", address, exc)
+            return jsonify([])
 
     # ----------------------------------------------------------------
     # API — wallet leaderboard
@@ -985,6 +1096,11 @@ def create_app(
             except ValueError:
                 return None
 
+        try:
+            min_markets = int(request.args.get("min_markets", 0) or 0) or None
+        except ValueError:
+            min_markets = None
+
         # ── Fetch strategy ────────────────────────────────────────────
         # When specific tags are selected we resolve their IDs and query
         # the Gamma /events?tag_id=... endpoint directly — much faster
@@ -1041,12 +1157,18 @@ def create_app(
             event_status=event_status,
             tags=effective_tags,
             exclude_tags=exclude_slugs,  # always applied in Python
+            min_event_vol=_flt("min_event_vol"),
+            max_event_vol=_flt("max_event_vol"),
+            end_date_filter=request.args.get("end_date_filter", "all"),
+            end_date_after=(request.args.get("end_date_after") or "").strip()[:10] or None,
+            end_date_before=(request.args.get("end_date_before") or "").strip()[:10] or None,
             market_status=market_status,
             min_market_vol=_flt("min_market_vol"),
             max_market_vol=_flt("max_market_vol"),
             min_market_liq=_flt("min_market_liq"),
             max_market_liq=_flt("max_market_liq"),
             max_spread=_flt("max_spread"),
+            min_markets=min_markets,
             sort_by=sort_by,
             sort_dir=sort_dir,
             page=page,

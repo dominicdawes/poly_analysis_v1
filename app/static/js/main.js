@@ -205,7 +205,7 @@ function renderTradeTable() {
       ? `<span class="badge badge--${(t.outcome||"").toLowerCase()}">${escHtml(t.outcome)}</span>`
       : "—";
 
-    const walletHref = `/wallet-dashboard?address=${encodeURIComponent(t.proxy_wallet || "")}`;
+    const walletHref = `/wallet-dashboard?address=${encodeURIComponent(t.proxy_wallet || "")}${CFG.marketId ? "&market_id=" + encodeURIComponent(CFG.marketId) : ""}`;
 
     return `<tr class="${isWhale ? "is-whale" : ""}">
       <td>${fmtTime(t.match_time)}</td>
@@ -256,7 +256,7 @@ function renderTraders() {
       ? `<img class="trader-avatar-lg" src="${escHtml(imgSrc)}" alt="" loading="lazy" onerror="this.style.display='none'">`
       : `<div class="trader-avatar-placeholder">◆</div>`;
 
-    const walletHref = `/wallet-dashboard?address=${encodeURIComponent(t.proxy_wallet || "")}`;
+    const walletHref = `/wallet-dashboard?address=${encodeURIComponent(t.proxy_wallet || "")}${CFG.marketId ? "&market_id=" + encodeURIComponent(CFG.marketId) : ""}`;
 
     return `
       <div class="trader-card ${isWhale ? "trader-card--whale" : ""}">

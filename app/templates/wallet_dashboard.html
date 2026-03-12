@@ -141,6 +141,14 @@
             <div class="stat-label">Largest Trade</div>
             <div class="stat-value" id="wStatLargest">—</div>
           </div>
+          <div class="stat-card">
+            <div class="stat-label">Avg Time Between Trades</div>
+            <div class="stat-value" id="wStatAvgTime">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Median Time Between Trades</div>
+            <div class="stat-value" id="wStatMedTime">—</div>
+          </div>
         </div>
 
         <!-- Right: PnL line chart -->
@@ -163,55 +171,113 @@
 
       </div><!-- /wallet-overview-wrap -->
 
-      <!-- Active Positions -->
-      <div class="panel">
-        <div class="panel-header">
-          <h2 class="panel-title">Active Positions</h2>
-          <span class="panel-sub" id="positionCount"></span>
+      <!-- Positions | Activity tab bar -->
+      <div class="wallet-section-tabs">
+        <button class="wallet-section-tab wallet-section-tab--active" data-tab="positions">Positions</button>
+        <button class="wallet-section-tab" data-tab="activity">Activity</button>
+      </div>
+
+      <!-- Positions panel -->
+      <div id="tabPositions" class="panel" style="padding:0;overflow:visible">
+        <div class="pos-controls">
+          <div class="pos-status-toggle">
+            <button class="pos-status-btn pos-status-btn--active" data-status="active">Active</button>
+            <button class="pos-status-btn" data-status="closed">Closed</button>
+          </div>
+          <div class="market-filter-wrap">
+            <button class="market-filter-btn" id="marketFilterBtn">
+              <span id="marketFilterLabel">All Markets</span><span class="market-filter-caret">▾</span>
+            </button>
+            <div class="market-filter-dropdown" id="marketFilterDropdown" style="display:none"></div>
+          </div>
+          <div class="table-page-size-wrap">
+            <span style="font-size:12px;color:var(--text-muted)">Rows:</span>
+            <select id="posPageSize" class="filter-select-sm">
+              <option value="25" selected>25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
         </div>
-        <div class="table-wrapper">
+
+        <div id="activePosResultCount" class="table-result-count"></div>
+        <div class="table-wrapper" id="activePositionsWrap">
           <table class="trade-table">
             <thead>
               <tr>
                 <th>Market</th>
                 <th>Outcome</th>
+                <th class="num">Avg Buy</th>
+                <th class="num">Current Price</th>
                 <th class="num">Shares</th>
-                <th class="num">Avg Entry</th>
-                <th class="num">Cost Basis</th>
-                <th class="num">Realized PnL</th>
+                <th class="num">Value</th>
               </tr>
             </thead>
-            <tbody id="positionsBody">
-              <tr><td colspan="6" class="empty">No active positions.</td></tr>
+            <tbody id="activePositionsBody">
+              <tr><td colspan="6" class="empty">—</td></tr>
             </tbody>
           </table>
         </div>
+        <div id="activePosPagination" class="table-pagination"></div>
+
+        <div id="closedPosResultCount" class="table-result-count" style="display:none"></div>
+        <div class="table-wrapper" id="closedPositionsWrap" style="display:none">
+          <table class="trade-table">
+            <thead>
+              <tr>
+                <th>Result</th>
+                <th>Market</th>
+                <th>Outcome</th>
+                <th class="num">Avg Entry</th>
+                <th class="num">PnL</th>
+              </tr>
+            </thead>
+            <tbody id="closedPositionsBody">
+              <tr><td colspan="5" class="empty">—</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div id="closedPosPagination" class="table-pagination" style="display:none"></div>
       </div>
 
-      <!-- Recent Trades -->
-      <div class="panel wallet-trades-panel">
-        <div class="panel-header">
-          <h2 class="panel-title">Recent Trades</h2>
-          <span class="panel-sub" id="walletTradeCount"></span>
+      <!-- Activity panel -->
+      <div id="tabActivity" class="panel" style="display:none;padding:0;overflow:visible">
+        <div class="pos-controls">
+          <div class="market-filter-wrap">
+            <button class="market-filter-btn" id="activityFilterBtn">
+              <span id="activityFilterLabel">All Markets</span><span class="market-filter-caret">▾</span>
+            </button>
+            <div class="market-filter-dropdown" id="activityFilterDropdown" style="display:none"></div>
+          </div>
+          <div class="table-page-size-wrap">
+            <span style="font-size:12px;color:var(--text-muted)">Rows:</span>
+            <select id="activityPageSize" class="filter-select-sm">
+              <option value="25" selected>25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
         </div>
+        <div id="activityResultCount" class="table-result-count"></div>
         <div class="table-wrapper">
           <table class="trade-table">
             <thead>
               <tr>
-                <th>Time (UTC)</th>
+                <th>Time</th>
+                <th>Type</th>
                 <th>Market</th>
-                <th>Side</th>
                 <th>Outcome</th>
                 <th class="num">Price</th>
                 <th class="num">Shares</th>
                 <th class="num">USDC</th>
               </tr>
             </thead>
-            <tbody id="walletTradesBody">
-              <tr><td colspan="7" class="empty">Loading…</td></tr>
+            <tbody id="activityBody">
+              <tr><td colspan="7" class="empty">Loading activity…</td></tr>
             </tbody>
           </table>
         </div>
+        <div id="activityPagination" class="table-pagination"></div>
       </div>
 
     </div><!-- /walletContent -->
@@ -226,7 +292,8 @@
   window.APP_CONFIG = {
     whaleThreshold: {{ whale_threshold }},
   };
-  window.INITIAL_ADDRESS = {{ address | tojson }};
+  window.INITIAL_ADDRESS   = {{ address   | tojson }};
+  window.INITIAL_MARKET_ID = {{ market_id | tojson }};
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <script src="/static/js/watchlist.js"></script>

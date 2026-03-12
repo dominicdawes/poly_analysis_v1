@@ -118,19 +118,63 @@
           </div>
         </div>
 
+        <!-- End date -->
+        <div class="filter-section">
+          <label class="filter-label">End Date</label>
+          <div class="scan-radio-group" id="endDateHasGroup">
+            <label><input type="radio" name="scanEndDateHas" value="all"  checked /> All</label>
+            <label><input type="radio" name="scanEndDateHas" value="has"         /> Has end date</label>
+            <label><input type="radio" name="scanEndDateHas" value="none"        /> No end date</label>
+          </div>
+          <div id="endDateRangeWrap" style="margin-top:8px;display:flex;flex-direction:column;gap:5px">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span class="end-date-label">After</span>
+              <input type="date" id="scanEndAfter"  class="filter-input filter-input--date" />
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span class="end-date-label">Before</span>
+              <input type="date" id="scanEndBefore" class="filter-input filter-input--date" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Event volume hybrid range -->
+        <div class="filter-section">
+          <label class="filter-label">Event Volume ($)</label>
+          <div class="hybrid-range-wrap">
+            <input type="text" class="range-numbox" id="evVolLoInput" title="Min event volume (click to edit)" />
+            <div class="dual-range" id="evVolRange">
+              <div class="range-track"><div class="range-fill" id="evVolFill"></div></div>
+              <input type="range" class="range-lower" id="evVolLow"  min="0" max="10000000" value="0"        step="10000" />
+              <input type="range" class="range-upper" id="evVolHigh" min="0" max="10000000" value="10000000" step="10000" />
+            </div>
+            <input type="text" class="range-numbox" id="evVolHiInput" title="Max event volume (click to edit)" />
+          </div>
+        </div>
+
         <!-- ── Market filters ── -->
         <div class="filter-section-header">Market Filters</div>
 
-        <!-- Market volume dual-range -->
+        <!-- Market volume hybrid range -->
         <div class="filter-section">
-          <label class="filter-label">
-            Volume ($)
-            <span class="filter-label-range" id="volRangeLabel">Any</span>
-          </label>
-          <div class="dual-range" id="volRange">
-            <div class="range-track"><div class="range-fill" id="volFill"></div></div>
-            <input type="range" class="range-lower" id="volLow"  min="0" max="10000000" value="0"        step="1000" />
-            <input type="range" class="range-upper" id="volHigh" min="0" max="10000000" value="10000000" step="1000" />
+          <label class="filter-label">Market Volume ($)</label>
+          <div class="hybrid-range-wrap">
+            <input type="text" class="range-numbox" id="volLoInput" title="Min volume (click to edit)" />
+            <div class="dual-range" id="volRange">
+              <div class="range-track"><div class="range-fill" id="volFill"></div></div>
+              <input type="range" class="range-lower" id="volLow"  min="0" max="10000000" value="0"        step="10000" />
+              <input type="range" class="range-upper" id="volHigh" min="0" max="10000000" value="10000000" step="10000" />
+            </div>
+            <input type="text" class="range-numbox" id="volHiInput" title="Max volume (click to edit)" />
+          </div>
+        </div>
+
+        <!-- Market count -->
+        <div class="filter-section">
+          <label class="filter-label">Market Count</label>
+          <div class="scan-checkbox-group">
+            <label><input type="checkbox" id="minMarkets3" /> 3 or more</label>
+            <label><input type="checkbox" id="minMarkets4" /> 4 or more</label>
           </div>
         </div>
 
@@ -217,11 +261,30 @@
         <!-- Results panel (shown after first scan) -->
         <div id="scannerPanel" style="display:none">
 
-          <!-- Header: count + cache info + cancel -->
+          <!-- Header: count + cache info + cancel + view toggle -->
           <div class="scanner-results-header">
             <span id="scanResultCount"></span>
             <span id="scanCacheInfo" class="dim" style="font-size:11px"></span>
             <button class="btn btn--sm btn--ghost" id="scanCancelBtn" style="display:none">✕ Cancel</button>
+            <div class="view-toggle">
+              <button class="view-toggle-btn" id="viewRow" title="Row view">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+                  <line x1="1" y1="3"  x2="13" y2="3"/>
+                  <line x1="1" y1="7"  x2="13" y2="7"/>
+                  <line x1="1" y1="11" x2="13" y2="11"/>
+                </svg>
+              </button>
+              <button class="view-toggle-btn" id="viewGrid" title="Grid view">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4">
+                  <rect x="1"   y="1" width="4" height="5" rx="0.5"/>
+                  <rect x="5"   y="1" width="4" height="5" rx="0.5"/>
+                  <rect x="9"   y="1" width="4" height="5" rx="0.5"/>
+                  <rect x="1"   y="8" width="4" height="5" rx="0.5"/>
+                  <rect x="5"   y="8" width="4" height="5" rx="0.5"/>
+                  <rect x="9"   y="8" width="4" height="5" rx="0.5"/>
+                </svg>
+              </button>
+            </div>
           </div>
 
           <!-- Event cards -->

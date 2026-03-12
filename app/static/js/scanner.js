@@ -57,14 +57,16 @@ async function loadTagsFromAPI() {
 let _page      = 1;
 let _pages     = 1;
 let _abortCtrl = null;
+let _viewMode  = localStorage.getItem("scanner_view") || "row";
 
 const _includeTags = new Map(); // slug → label  (events MUST have one of these)
 const _excludeTags = new Map(); // slug → label  (events MUST NOT have any of these)
 let   _includeTagReset;
 let   _excludeTagReset;
 
-const _vol = { lo: 0, hi: 10_000_000 };
-const _liq = { lo: 0, hi:  5_000_000 };
+const _evVol = { lo: 0, hi: 10_000_000 };
+const _vol   = { lo: 0, hi: 10_000_000 };
+const _liq   = { lo: 0, hi:  5_000_000 };
 
 // ── Formatters ─────────────────────────────────────────────────────
 
@@ -121,6 +123,29 @@ function truncate(s, max) {
   return s && s.length > max ? s.slice(0, max) + "…" : (s || "");
 }
 
+// Parse a number string that may contain K/M suffixes or commas.
+function parseNum(s) {
+  s = String(s || "").trim().replace(/[$,\s]/g, "");
+  if (!s) return NaN;
+  const m = s.match(/^([\d.]+)\s*([kmb]?)$/i);
+  if (!m) return parseFloat(s);
+  const n      = parseFloat(m[1]);
+  const suffix = m[2].toLowerCase();
+  if (suffix === "k") return n * 1_000;
+  if (suffix === "m") return n * 1_000_000;
+  if (suffix === "b") return n * 1_000_000_000;
+  return n;
+}
+
+// Format a raw number for the idle numbox display (no $ prefix).
+function fmtNumInput(v, max) {
+  if (v <= 0)    return "0";
+  if (v >= max)  return "Any";
+  if (v >= 1_000_000) return (v / 1_000_000).toFixed(v % 1_000_000 === 0 ? 0 : 1) + "M";
+  if (v >= 1_000)     return (v / 1_000).toFixed(v % 1_000 === 0 ? 0 : 0) + "K";
+  return String(v);
+}
+
 // ── Spread helpers ─────────────────────────────────────────────────
 
 function calcSpread(prices) {
@@ -175,6 +200,89 @@ function initDualRange(lowId, highId, fillId, labelId, state) {
     lowEl.value  = lowEl.min;
     highEl.value = highEl.max;
     update();
+  };
+}
+
+// ── Hybrid range: number-input | slider | number-input ─────────────
+// Replaces initDualRange for volume. No label span needed.
+function initHybridRange(lowId, highId, fillId, loInputId, hiInputId, state) {
+  const lowEl   = document.getElementById(lowId);
+  const highEl  = document.getElementById(highId);
+  const fillEl  = document.getElementById(fillId);
+  const loInput = document.getElementById(loInputId);
+  const hiInput = document.getElementById(hiInputId);
+  const MAX     = parseFloat(lowEl.max);
+  const MIN     = parseFloat(lowEl.min);
+
+  function updateFill() {
+    const lo = parseFloat(lowEl.value);
+    const hi = parseFloat(highEl.value);
+    const pLo = ((lo - MIN) / (MAX - MIN)) * 100;
+    const pHi = ((hi - MIN) / (MAX - MIN)) * 100;
+    fillEl.style.left  = pLo + "%";
+    fillEl.style.width = (pHi - pLo) + "%";
+  }
+
+  function syncFromSliders() {
+    const lo = parseFloat(lowEl.value);
+    const hi = parseFloat(highEl.value);
+    state.lo = lo;
+    state.hi = hi;
+    if (document.activeElement !== loInput) loInput.value = fmtNumInput(lo, MAX);
+    if (document.activeElement !== hiInput) hiInput.value = fmtNumInput(hi, MAX);
+    updateFill();
+  }
+
+  // Slider events
+  lowEl.addEventListener("input", () => {
+    if (parseFloat(lowEl.value) > parseFloat(highEl.value))
+      lowEl.value = highEl.value;
+    syncFromSliders();
+  });
+  highEl.addEventListener("input", () => {
+    if (parseFloat(highEl.value) < parseFloat(lowEl.value))
+      highEl.value = lowEl.value;
+    syncFromSliders();
+  });
+
+  // Lo numbox: show raw number on focus, formatted on blur
+  loInput.addEventListener("focus", () => {
+    loInput.value = Math.round(parseFloat(lowEl.value));
+    loInput.select();
+  });
+  loInput.addEventListener("blur", () => {
+    const val     = parseNum(loInput.value);
+    const clamped = isNaN(val) ? MIN : Math.max(MIN, Math.min(MAX, val));
+    lowEl.value   = Math.min(clamped, parseFloat(highEl.value));
+    syncFromSliders();
+  });
+  loInput.addEventListener("keydown", e => { if (e.key === "Enter") loInput.blur(); });
+
+  // Hi numbox: empty = "Any" = MAX
+  hiInput.addEventListener("focus", () => {
+    const cur = parseFloat(highEl.value);
+    hiInput.value = cur >= MAX ? "" : Math.round(cur);
+    hiInput.select();
+  });
+  hiInput.addEventListener("blur", () => {
+    const val = parseNum(hiInput.value);
+    if (hiInput.value === "" || isNaN(val) || val >= MAX) {
+      highEl.value = MAX;
+    } else {
+      const clamped = Math.max(parseFloat(lowEl.value), Math.min(MAX, val));
+      highEl.value  = clamped;
+    }
+    syncFromSliders();
+  });
+  hiInput.addEventListener("keydown", e => { if (e.key === "Enter") hiInput.blur(); });
+
+  // Init display
+  syncFromSliders();
+
+  return function reset() {
+    lowEl.value  = MIN;
+    highEl.value = MAX;
+    syncFromSliders();
   };
 }
 
@@ -300,6 +408,19 @@ function buildQueryString() {
   if (_includeTags.size) params.set("tags",         [..._includeTags.keys()].join(","));
   if (_excludeTags.size) params.set("exclude_tags",  [..._excludeTags.keys()].join(","));
 
+  // End date filter
+  const endHas = document.querySelector('input[name="scanEndDateHas"]:checked');
+  if (endHas && endHas.value !== "all") params.set("end_date_filter", endHas.value);
+  const endAfter  = (document.getElementById("scanEndAfter")?.value  || "").trim();
+  const endBefore = (document.getElementById("scanEndBefore")?.value || "").trim();
+  if (endAfter)  params.set("end_date_after",  endAfter);
+  if (endBefore) params.set("end_date_before", endBefore);
+
+  // Event-level volume filter
+  const evVolMax = parseFloat(document.getElementById("evVolHigh").max);
+  if (_evVol.lo > 0)         params.set("min_event_vol", _evVol.lo);
+  if (_evVol.hi < evVolMax)  params.set("max_event_vol", _evVol.hi);
+
   // Market-level filters
   const mktStatus = document.querySelector('input[name="scanMktStatus"]:checked');
   if (mktStatus && mktStatus.value !== "all") params.set("market_status", mktStatus.value);
@@ -315,12 +436,27 @@ function buildQueryString() {
   const spread = (document.getElementById("scanMaxSpread").value || "").trim();
   if (spread) params.set("max_spread", spread);
 
+  // Market count filter — mutually exclusive checkboxes
+  if (document.getElementById("minMarkets4")?.checked)      params.set("min_markets", 4);
+  else if (document.getElementById("minMarkets3")?.checked) params.set("min_markets", 3);
+
   params.set("sort_by",   document.getElementById("scanSortBy").value);
   params.set("sort_dir",  document.getElementById("scanSortDir").value);
   params.set("page",      _page);
   params.set("page_size", 25);
 
   return params.toString();
+}
+
+// ── View toggle ────────────────────────────────────────────────────
+
+function setViewMode(mode) {
+  _viewMode = mode;
+  try { localStorage.setItem("scanner_view", mode); } catch {}
+  document.getElementById("scannerEvents")
+    ?.classList.toggle("scanner-events--grid", mode === "grid");
+  document.getElementById("viewRow") ?.classList.toggle("view-toggle-btn--active", mode === "row");
+  document.getElementById("viewGrid")?.classList.toggle("view-toggle-btn--active", mode === "grid");
 }
 
 // ── Skeleton ───────────────────────────────────────────────────────
@@ -406,8 +542,14 @@ function renderMarketCard(m) {
 }
 
 function renderEventCard(ev) {
-  const markets = ev.markets || [];
-  const title   = escHtml(truncate(ev.title || "(no title)", 140));
+  // Sort markets by YES ask price descending so most-probable outcome is first.
+  const markets = (ev.markets || []).slice().sort((a, b) => {
+    let pa = 0, pb = 0;
+    try { pa = parseFloat(JSON.parse(a.outcomePrices || "[]")[0]) || 0; } catch {}
+    try { pb = parseFloat(JSON.parse(b.outcomePrices || "[]")[0]) || 0; } catch {}
+    return pb - pa;
+  });
+  const title = escHtml(truncate(ev.title || "(no title)", 140));
 
   const tagBadges = (ev.tags || []).slice(0, 4)
     .map(t => `<span class="category-badge">${escHtml(t.label || t.slug || "")}</span>`)
@@ -423,10 +565,8 @@ function renderEventCard(ev) {
   return `
     <div class="event-card">
       <div class="event-card-header">
-        <div class="event-card-title-row">
-          <div class="event-card-title">${title}</div>
-          <div class="event-card-badges">${tagBadges}</div>
-        </div>
+        <div class="event-card-title">${title}</div>
+        ${tagBadges ? `<div class="event-card-badges">${tagBadges}</div>` : ""}
         <div class="event-card-meta">
           <span>24h <b>${vol24}</b></span>
           <span>Total <b>${volTotal}</b></span>
@@ -554,7 +694,7 @@ async function doScan(resetPage = true) {
 
 // ── Reset ─────────────────────────────────────────────────────────
 
-let _resetVol, _resetLiq;
+let _resetEvVol, _resetVol, _resetLiq;
 
 function resetFilters() {
   document.getElementById("scanQ").value = "";
@@ -567,10 +707,25 @@ function resetFilters() {
 
   document.getElementById("scanMaxSpread").value = "";
 
+  const cb3 = document.getElementById("minMarkets3");
+  const cb4 = document.getElementById("minMarkets4");
+  if (cb3) cb3.checked = false;
+  if (cb4) cb4.checked = false;
+
+  const allEnd = document.querySelector('input[name="scanEndDateHas"][value="all"]');
+  if (allEnd) allEnd.checked = true;
+  const endRangeWrap = document.getElementById("endDateRangeWrap");
+  if (endRangeWrap) endRangeWrap.style.display = "";
+  const scanEndAfter  = document.getElementById("scanEndAfter");
+  const scanEndBefore = document.getElementById("scanEndBefore");
+  if (scanEndAfter)  scanEndAfter.value  = "";
+  if (scanEndBefore) scanEndBefore.value = "";
+
   if (_includeTagReset) _includeTagReset();
   if (_excludeTagReset) _excludeTagReset();
-  if (_resetVol) _resetVol();
-  if (_resetLiq) _resetLiq();
+  if (_resetEvVol) _resetEvVol();
+  if (_resetVol)   _resetVol();
+  if (_resetLiq)   _resetLiq();
 
   document.getElementById("scanSortBy").value  = "volume";
   document.getElementById("scanSortDir").value = "desc";
@@ -579,14 +734,34 @@ function resetFilters() {
 // ── Init ──────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", () => {
-  _resetVol        = initDualRange("volLow", "volHigh", "volFill", "volRangeLabel", _vol);
+  _resetEvVol      = initHybridRange("evVolLow", "evVolHigh", "evVolFill", "evVolLoInput", "evVolHiInput", _evVol);
+  _resetVol        = initHybridRange("volLow", "volHigh", "volFill", "volLoInput", "volHiInput", _vol);
   _resetLiq        = initDualRange("liqLow", "liqHigh", "liqFill", "liqRangeLabel", _liq);
+
+  // Market-count checkboxes are mutually exclusive (checking one unchecks the other)
+  const cb3 = document.getElementById("minMarkets3");
+  const cb4 = document.getElementById("minMarkets4");
+  cb3?.addEventListener("change", () => { if (cb3.checked && cb4) cb4.checked = false; });
+  cb4?.addEventListener("change", () => { if (cb4.checked && cb3) cb3.checked = false; });
   _includeTagReset = initTagInput("includeTagInput", "includeTagDropdown", "includeTagPills", _includeTags, "");
   _excludeTagReset = initTagInput("excludeTagInput", "excludeTagDropdown", "excludeTagPills", _excludeTags, "tag-pill--exclude");
 
   // Silently load full tag list from server (replaces preset fallback).
   // The dropdown re-reads _allTags on every open so no re-init needed.
   loadTagsFromAPI();
+
+  // View toggle
+  document.getElementById("viewRow") ?.addEventListener("click", () => setViewMode("row"));
+  document.getElementById("viewGrid")?.addEventListener("click", () => setViewMode("grid"));
+  setViewMode(_viewMode); // apply persisted preference immediately
+
+  // End date radio — hide date range pickers when "No end date" is selected
+  document.querySelectorAll('input[name="scanEndDateHas"]').forEach(radio => {
+    radio.addEventListener("change", () => {
+      const wrap = document.getElementById("endDateRangeWrap");
+      if (wrap) wrap.style.display = radio.value === "none" ? "none" : "";
+    });
+  });
 
   document.getElementById("scanBtn").addEventListener("click",       () => doScan(true));
   document.getElementById("scanResetBtn").addEventListener("click",  resetFilters);
