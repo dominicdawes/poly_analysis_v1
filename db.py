@@ -36,6 +36,7 @@ class Database:
         self._create_schema()
         self._extend_schema()
         self._extend_watchlists_schema()
+        self._migrate_watchlists_add_event_type()
         self._extend_tags_schema()
 
     # ----------------------------------------------------------------
@@ -200,6 +201,40 @@ class Database:
 
         conn.commit()
         conn.close()
+
+    def _migrate_watchlists_add_event_type(self):
+        """Migration: recreate watchlists table without type CHECK constraint to allow 'event' type.
+        Non-destructive — probes first and only migrates if needed."""
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA journal_mode=WAL")
+        # Probe whether 'event' type already works
+        try:
+            conn.execute("INSERT INTO watchlists (name, type) VALUES ('__probe__', 'event')")
+            conn.execute("DELETE FROM watchlists WHERE name = '__probe__'")
+            conn.commit()
+            conn.close()
+            return  # already migrated
+        except Exception:
+            pass
+        # Recreate without CHECK constraint
+        conn.executescript("""
+            PRAGMA foreign_keys=OFF;
+            CREATE TABLE watchlists_new (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT    NOT NULL,
+                type       TEXT    NOT NULL,
+                is_default INTEGER DEFAULT 0,
+                created_at TEXT    DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO watchlists_new SELECT * FROM watchlists;
+            DROP TABLE watchlists;
+            ALTER TABLE watchlists_new RENAME TO watchlists;
+            CREATE INDEX IF NOT EXISTS idx_wl_items_list ON watchlist_items(watchlist_id);
+            PRAGMA foreign_keys=ON;
+        """)
+        conn.commit()
+        conn.close()
+        logger.info("watchlists table migrated to support 'event' type")
 
     def _extend_tags_schema(self):
         """Add scanner_tags table for persisting Polymarket tag definitions.
@@ -739,7 +774,7 @@ class Database:
         """Create the two default watchlists if none exist of each type."""
         conn = self._get_conn()
         try:
-            for wl_type, name in [("wallet", "Default Wallets"), ("market", "Default Markets")]:
+            for wl_type, name in [("wallet", "Default Wallets"), ("market", "Default Markets"), ("event", "Default Events")]:
                 existing = conn.execute(
                     "SELECT id FROM watchlists WHERE type = ? AND is_default = 1", (wl_type,)
                 ).fetchone()
@@ -944,8 +979,7 @@ class Database:
                 """,
                 (wl_id,),
             ).fetchall()
-        else:
-            # Markets — volume from trades
+        elif wl_type == "market":
             rows = conn.execute(
                 """
                 SELECT
@@ -961,6 +995,23 @@ class Database:
                     (SELECT SUM(t.amount) FROM trades t WHERE t.market_id = wi.identifier) AS total_volume
                 FROM watchlist_items wi
                 LEFT JOIN markets m ON m.condition_id = wi.identifier
+                WHERE wi.watchlist_id = ?
+                ORDER BY wi.added_at DESC
+                """,
+                (wl_id,),
+            ).fetchall()
+        else:
+            # Events — just use stored label, no local DB join available
+            rows = conn.execute(
+                """
+                SELECT
+                    wi.id,
+                    wi.watchlist_id,
+                    wi.identifier,
+                    wi.label,
+                    wi.added_at,
+                    COALESCE(wi.label, wi.identifier) AS display_name
+                FROM watchlist_items wi
                 WHERE wi.watchlist_id = ?
                 ORDER BY wi.added_at DESC
                 """,

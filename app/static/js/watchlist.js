@@ -388,9 +388,11 @@ if (!window.WL_PAGE) {
     }
 
     if (empty) empty.style.display = "none";
-    cards.innerHTML = items.map(item =>
-      _activeType === "wallet" ? _walletCardHtml(item) : _marketCardHtml(item)
-    ).join("");
+    cards.innerHTML = items.map(item => {
+      if (_activeType === "wallet") return _walletCardHtml(item);
+      if (_activeType === "market") return _marketCardHtml(item);
+      return _eventCardHtml(item);
+    }).join("");
 
     // Wire up card clicks + overflow buttons
     cards.querySelectorAll(".wl-card[data-identifier]").forEach(card => {
@@ -400,8 +402,10 @@ if (!window.WL_PAGE) {
         if (e.target.closest(".overflow-btn")) return;
         if (_activeType === "wallet") {
           window.location.href = `/wallet-dashboard?address=${encodeURIComponent(idf)}`;
-        } else {
+        } else if (_activeType === "market") {
           window.location.href = `/?market_id=${encodeURIComponent(idf)}`;
+        } else {
+          window.location.href = `/scanner`;
         }
       });
     });
@@ -485,6 +489,32 @@ if (!window.WL_PAGE) {
           </div>
           ${item.end_date ? `<div class="wl-card-stat"><div class="wl-card-stat-label">End Date</div><div class="wl-card-stat-value">${_escHtml(item.end_date.slice(0, 10))}</div></div>` : ""}
           ${item.resolved ? `<div class="wl-card-stat"><div class="wl-card-stat-label">Status</div><div class="wl-card-stat-value" style="color:var(--text-muted)">Resolved</div></div>` : ""}
+        </div>
+      </div>
+    `;
+  }
+
+  function _eventCardHtml(item) {
+    const title  = item.display_name || item.identifier;
+    const titleSh = title.length > 70 ? title.slice(0, 67) + "…" : title;
+    const added  = item.added_at ? item.added_at.slice(0, 10) : "—";
+    const idf    = item.identifier;
+
+    return `
+      <div class="wl-card" data-identifier="${_escHtml(idf)}">
+        <div class="wl-card-header">
+          <div class="wl-card-name" title="${_escHtml(title)}">${_escHtml(titleSh)}</div>
+          <button class="overflow-btn" data-item-id="${item.id}" data-identifier="${_escHtml(idf)}" title="Options">•••</button>
+        </div>
+        <div class="wl-card-stats">
+          <div class="wl-card-stat">
+            <div class="wl-card-stat-label">Event ID</div>
+            <div class="wl-card-stat-value" style="font-size:11px;color:var(--text-muted)">${_escHtml(idf.slice(0, 12))}…</div>
+          </div>
+          <div class="wl-card-stat">
+            <div class="wl-card-stat-label">Added</div>
+            <div class="wl-card-stat-value">${added}</div>
+          </div>
         </div>
       </div>
     `;

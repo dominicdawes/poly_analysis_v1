@@ -950,8 +950,8 @@ def create_app(
         type_ = (body.get("type") or "").strip()
         if not name:
             return jsonify({"error": "name is required"}), 400
-        if type_ not in ("wallet", "market"):
-            return jsonify({"error": "type must be 'wallet' or 'market'"}), 400
+        if type_ not in ("wallet", "market", "event"):
+            return jsonify({"error": "type must be 'wallet', 'market', or 'event'"}), 400
         result = db.create_watchlist(name, type_)
         if result is None:
             return jsonify({"error": "Failed to create watchlist"}), 500

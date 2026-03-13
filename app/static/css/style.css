@@ -1974,11 +1974,45 @@ td.empty {
   gap: 6px;
 }
 
+.event-card-title-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
 .event-card-title {
   font-size: 13px;
   font-weight: 600;
   color: var(--text);
   line-height: 1.35;
+  flex: 1;
+}
+
+.bookmark-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+.bookmark-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.bookmark-btn--saved {
+  color: #fff;
+}
+.bookmark-btn--saved:hover {
+  color: #fff;
+  background: var(--bg-hover);
 }
 
 .event-card-badges {

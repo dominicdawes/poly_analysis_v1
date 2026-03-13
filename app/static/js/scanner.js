@@ -59,6 +59,9 @@ let _pages     = 1;
 let _abortCtrl = null;
 let _viewMode  = localStorage.getItem("scanner_view") || "row";
 
+// Track events the user has bookmarked (updated after modal save).
+const _watchedEvents = new Set();
+
 const _includeTags = new Map(); // slug → label  (events MUST have one of these)
 const _excludeTags = new Map(); // slug → label  (events MUST NOT have any of these)
 let   _includeTagReset;
@@ -541,6 +544,9 @@ function renderMarketCard(m) {
     </div>`;
 }
 
+const _BOOKMARK_EMPTY = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2h10a1 1 0 0 1 1 1v11l-6-3-6 3V3a1 1 0 0 1 1-1z"/></svg>`;
+const _BOOKMARK_FILLED = `<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2h10a1 1 0 0 1 1 1v11l-6-3-6 3V3a1 1 0 0 1 1-1z"/></svg>`;
+
 function renderEventCard(ev) {
   // Sort markets by YES ask price descending so most-probable outcome is first.
   const markets = (ev.markets || []).slice().sort((a, b) => {
@@ -549,7 +555,10 @@ function renderEventCard(ev) {
     try { pb = parseFloat(JSON.parse(b.outcomePrices || "[]")[0]) || 0; } catch {}
     return pb - pa;
   });
-  const title = escHtml(truncate(ev.title || "(no title)", 140));
+  const evId    = ev.id || "";
+  const title   = escHtml(truncate(ev.title || "(no title)", 140));
+  const rawTitle = ev.title || "(no title)";
+  const isSaved = _watchedEvents.has(String(evId));
 
   const tagBadges = (ev.tags || []).slice(0, 4)
     .map(t => `<span class="category-badge">${escHtml(t.label || t.slug || "")}</span>`)
@@ -563,9 +572,14 @@ function renderEventCard(ev) {
   const marketCardsHtml = markets.map(renderMarketCard).join("");
 
   return `
-    <div class="event-card">
+    <div class="event-card" data-ev-id="${escHtml(String(evId))}" data-ev-title="${escHtml(rawTitle)}">
       <div class="event-card-header">
-        <div class="event-card-title">${title}</div>
+        <div class="event-card-title-wrap">
+          <div class="event-card-title">${title}</div>
+          <button class="bookmark-btn${isSaved ? " bookmark-btn--saved" : ""}" title="Add to watchlist" aria-label="Bookmark event">
+            ${isSaved ? _BOOKMARK_FILLED : _BOOKMARK_EMPTY}
+          </button>
+        </div>
         ${tagBadges ? `<div class="event-card-badges">${tagBadges}</div>` : ""}
         <div class="event-card-meta">
           <span>24h <b>${vol24}</b></span>
@@ -634,6 +648,22 @@ function renderResults(data) {
     });
   });
 
+  // Wire bookmark buttons
+  container.querySelectorAll(".bookmark-btn").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const card   = btn.closest(".event-card");
+      const evId   = card?.dataset.evId   || "";
+      const evTitle = card?.dataset.evTitle || "";
+      if (!evId || !window.WL) return;
+      window.WL.showAddModal("event", evId, evTitle, () => {
+        _watchedEvents.add(String(evId));
+        btn.classList.add("bookmark-btn--saved");
+        btn.innerHTML = _BOOKMARK_FILLED;
+      });
+    });
+  });
+
   const total = data.total || 0;
   const pg    = data.page  || 1;
   const pgs   = data.pages || 1;
@@ -699,7 +729,7 @@ let _resetEvVol, _resetVol, _resetLiq;
 function resetFilters() {
   document.getElementById("scanQ").value = "";
 
-  const allEv = document.querySelector('input[name="scanEventStatus"][value="all"]');
+  const allEv = document.querySelector('input[name="scanEventStatus"][value="active"]');
   if (allEv) allEv.checked = true;
 
   const allMkt = document.querySelector('input[name="scanMktStatus"][value="all"]');
